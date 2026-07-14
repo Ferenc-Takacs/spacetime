@@ -1,0 +1,10 @@
+[package]
+name = "spacetime"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+bytemuck = { version = "1.25.1", features = ["derive"] }
+pollster = "1.0.1"
+wgpu = { version = "30.0.0", features = ["fragile-send-sync-non-atomic-wasm"] }
