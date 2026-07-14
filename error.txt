@@ -1,0 +1,813 @@
+
+C:\rust\spacetime>cargo run
+   Compiling spacetime v0.1.0 (C:\rust\spacetime)
+error[E0425]: cannot find value `instance` in this scope
+   --> src\main.rs:570:17
+    |
+570 |                 instance.poll_all(true);
+    |                 ^^^^^^^^ not found in this scope
+
+error[E0599]: no method named `create_buffer_init` found for reference `&eframe::wgpu::Device` in the current scope
+   --> src\main.rs:395:48
+    |
+395 |                     self.input_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    |                                         -------^^^^^^^^^^^^^^^^^^
+    |
+    = help: items from traits can only be used if the trait is in scope
+help: trait `DeviceExt` which provides `create_buffer_init` is implemented but not in scope; perhaps you want to import it
+    |
+  1 + use eframe::wgpu::util::DeviceExt;
+    |
+help: there is a method `create_buffer` with a similar name
+    |
+395 -                     self.input_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+395 +                     self.input_buffer = device.create_buffer(&wgpu::util::BufferInitDescriptor {
+    |
+
+error[E0609]: no field `width` on type `&mut SpacetimeApp`
+   --> src\main.rs:402:65
+    |
+402 |                     let dims_data = GridDimensions { width:self.width, height:self.height, depth:self.depth, dx: self.dx };
+    |                                                                 ^^^^^ unknown field
+    |
+help: one of the expressions' fields has a field of the same name
+    |
+402 |                     let dims_data = GridDimensions { width:self.grid.width, height:self.height, depth:self.depth, dx: self.dx };
+    |                                                                 +++++
+
+error[E0609]: no field `height` on type `&mut SpacetimeApp`
+   --> src\main.rs:402:84
+    |
+402 |                     let dims_data = GridDimensions { width:self.width, height:self.height, depth:self.depth, dx: self.dx };
+    |                                                                                    ^^^^^^ unknown field
+    |
+help: one of the expressions' fields has a field of the same name
+    |
+402 |                     let dims_data = GridDimensions { width:self.width, height:self.grid.height, depth:self.depth, dx: self.dx };
+    |                                                                                    +++++
+
+error[E0609]: no field `depth` on type `&mut SpacetimeApp`
+   --> src\main.rs:402:103
+    |
+402 |                     let dims_data = GridDimensions { width:self.width, height:self.height, depth:self.depth, dx: self.dx };
+    |                                                                                                       ^^^^^ unknown field
+    |
+help: one of the expressions' fields has a field of the same name
+    |
+402 |                     let dims_data = GridDimensions { width:self.width, height:self.height, depth:self.grid.depth, dx: self.dx };
+    |                                                                                                       +++++
+
+error[E0609]: no field `dx` on type `&mut SpacetimeApp`
+   --> src\main.rs:402:119
+    |
+402 |                     let dims_data = GridDimensions { width:self.width, height:self.height, depth:self.depth, dx: self.dx };
+    |                                                                                                                       ^^ unknown field
+    |
+    = note: available fields are: `grid`, `pipeline_initialized`, `compute_pipeline`, `bind_group`, `input_buffer` ... and 2 others
+
+error[E0599]: no method named `create_buffer_init` found for reference `&eframe::wgpu::Device` in the current scope
+   --> src\main.rs:403:46
+    |
+403 |                     let dims_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    |                                       -------^^^^^^^^^^^^^^^^^^
+    |
+    = help: items from traits can only be used if the trait is in scope
+help: trait `DeviceExt` which provides `create_buffer_init` is implemented but not in scope; perhaps you want to import it
+    |
+  1 + use eframe::wgpu::util::DeviceExt;
+    |
+help: there is a method `create_buffer` with a similar name
+    |
+403 -                     let dims_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+403 +                     let dims_buffer = device.create_buffer(&wgpu::util::BufferInitDescriptor {
+    |
+
+error[E0609]: no field `width` on type `&mut SpacetimeApp`
+   --> src\main.rs:409:46
+    |
+409 |                     let total_points = (self.width * self.height * self.depth) as u64;
+    |                                              ^^^^^ unknown field
+    |
+help: one of the expressions' fields has a field of the same name
+    |
+409 |                     let total_points = (self.grid.width * self.height * self.depth) as u64;
+    |                                              +++++
+
+error[E0609]: no field `height` on type `&mut SpacetimeApp`
+   --> src\main.rs:409:59
+    |
+409 |                     let total_points = (self.width * self.height * self.depth) as u64;
+    |                                                           ^^^^^^ unknown field
+    |
+help: one of the expressions' fields has a field of the same name
+    |
+409 |                     let total_points = (self.width * self.grid.height * self.depth) as u64;
+    |                                                           +++++
+
+error[E0609]: no field `depth` on type `&mut SpacetimeApp`
+   --> src\main.rs:409:73
+    |
+409 |                     let total_points = (self.width * self.height * self.depth) as u64;
+    |                                                                         ^^^^^ unknown field
+    |
+help: one of the expressions' fields has a field of the same name
+    |
+409 |                     let total_points = (self.width * self.height * self.grid.depth) as u64;
+    |                                                                         +++++
+
+error[E0308]: mismatched types
+   --> src\main.rs:412:63
+    |
+412 |                       self.output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+    |  _________________________________________________-------------_^
+    | |                                                 |
+    | |                                                 arguments to this method are incorrect
+413 | |                         label: Some("Output Invariants Buffer"),
+414 | |                         size: output_buffer_size,
+...   |
+417 | |                         mapped_at_creation: false,
+418 | |                     });
+    | |_____________________^ expected `BufferDescriptor<Option<&str>>`, found a different `BufferDescriptor<Option<&str>>`
+    |
+note: two different versions of crate `wgpu_types` are being used; two types coming from two different versions of the same crate are different types even if they look the same
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-types-30.0.0\src\buffer.rs:14:1
+    |
+ 14 | pub struct BufferDescriptor<L> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the found type `wgpu::wgpu_types::BufferDescriptor`
+    |
+   ::: C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-types-29.0.4\src\buffer.rs:14:1
+    |
+ 14 | pub struct BufferDescriptor<L> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the expected type `eframe::wgpu::wgpu_types::BufferDescriptor`
+    |
+   ::: src\main.rs:3:5
+    |
+  3 | use eframe::egui;
+    |     ------ one version of crate `wgpu_types` used here, as a dependency of crate `wgpu_hal`
+...
+343 |     pub compute_pipeline: Option<wgpu::ComputePipeline>,
+    |                                  ---- one version of crate `wgpu_types` used here, as a dependency of crate `wgpu_hal`
+    = help: you can use `cargo tree` to explore your dependency tree
+note: method defined here
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\device.rs:277:12
+    |
+277 |     pub fn create_buffer(&self, desc: &BufferDescriptor<'_>) -> Buffer {
+    |            ^^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+   --> src\main.rs:412:42
+    |
+412 |                       self.output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+    |  _____________________------------------___^
+    | |                     |
+    | |                     expected due to the type of this binding
+413 | |                         label: Some("Output Invariants Buffer"),
+414 | |                         size: output_buffer_size,
+...   |
+417 | |                         mapped_at_creation: false,
+418 | |                     });
+    | |______________________^ expected `Option<Buffer>`, found `Buffer`
+    |
+    = note: expected enum `Option<wgpu::Buffer>`
+             found struct `eframe::wgpu::Buffer`
+
+error[E0308]: mismatched types
+   --> src\main.rs:420:77
+    |
+420 |                       let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+    |  ____________________________________________________------------------------_^
+    | |                                                    |
+    | |                                                    arguments to this method are incorrect
+421 | |                         label: Some("Invariants Bind Group Layout"),
+422 | |                         entries: &[
+...   |
+456 | |                         ],
+457 | |                     });
+    | |_____________________^ expected `BindGroupLayoutDescriptor<'_>`, found `wgpu::BindGroupLayoutDescriptor<'_>`
+    |
+note: two different versions of crate `wgpu` are being used; two types coming from two different versions of the same crate are different types even if they look the same
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\bind_group_layout.rs:38:1
+    |
+ 38 | pub struct BindGroupLayoutDescriptor<'a> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the expected type `eframe::wgpu::BindGroupLayoutDescriptor`
+    |
+   ::: C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-30.0.0\src\api\bind_group_layout.rs:38:1
+    |
+ 38 | pub struct BindGroupLayoutDescriptor<'a> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the found type `wgpu::BindGroupLayoutDescriptor`
+    |
+   ::: src\main.rs:3:5
+    |
+  3 | use eframe::egui;
+    |     ------ one version of crate `wgpu` used here, as a dependency of crate `egui_wgpu`
+...
+343 |     pub compute_pipeline: Option<wgpu::ComputePipeline>,
+    |                                  ---- one version of crate `wgpu` used here, as a direct dependency of the current crate
+    = help: you can use `cargo tree` to explore your dependency tree
+note: method defined here
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\device.rs:239:12
+    |
+239 |     pub fn create_bind_group_layout(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+   --> src\main.rs:461:33
+    |
+461 |                         layout: &bind_group_layout,
+    |                                 ^^^^^^^^^^^^^^^^^^ expected `wgpu::BindGroupLayout`, found `eframe::wgpu::BindGroupLayout`
+    |
+note: two different versions of crate `wgpu` are being used; two types coming from two different versions of the same crate are different types even if they look the same
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\bind_group_layout.rs:15:1
+    |
+ 15 | pub struct BindGroupLayout {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the found type `eframe::wgpu::BindGroupLayout`
+    |
+   ::: C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-30.0.0\src\api\bind_group_layout.rs:15:1
+    |
+ 15 | pub struct BindGroupLayout {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the expected type `wgpu::BindGroupLayout`
+    |
+   ::: src\main.rs:3:5
+    |
+  3 | use eframe::egui;
+    |     ------ one version of crate `wgpu` used here, as a dependency of crate `egui_wgpu`
+...
+343 |     pub compute_pipeline: Option<wgpu::ComputePipeline>,
+    |                                  ---- one version of crate `wgpu` used here, as a direct dependency of the current crate
+    = help: you can use `cargo tree` to explore your dependency tree
+
+error[E0599]: no method named `as_entire_binding` found for enum `Option<T>` in the current scope
+   --> src\main.rs:469:61
+    |
+469 | ...                   resource: self.input_buffer.as_entire_binding(),
+    |                                                   ^^^^^^^^^^^^^^^^^ method not found in `Option<wgpu::Buffer>`
+    |
+note: the method `as_entire_binding` exists on the type `wgpu::Buffer`
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-30.0.0\src\api\buffer.rs:236:5
+    |
+236 |     pub fn as_entire_binding(&self) -> BindingResource<'_> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: consider using `Option::expect` to unwrap the `wgpu::Buffer` value, panicking if the value is an `Option::None`
+    |
+469 |                                 resource: self.input_buffer.expect("REASON").as_entire_binding(),
+    |                                                            +++++++++++++++++
+
+error[E0599]: no method named `as_entire_binding` found for enum `Option<T>` in the current scope
+   --> src\main.rs:473:62
+    |
+473 | ...                   resource: self.output_buffer.as_entire_binding(),
+    |                                                    ^^^^^^^^^^^^^^^^^ method not found in `Option<wgpu::Buffer>`
+    |
+note: the method `as_entire_binding` exists on the type `wgpu::Buffer`
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-30.0.0\src\api\buffer.rs:236:5
+    |
+236 |     pub fn as_entire_binding(&self) -> BindingResource<'_> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: consider using `Option::expect` to unwrap the `wgpu::Buffer` value, panicking if the value is an `Option::None`
+    |
+473 |                                 resource: self.output_buffer.expect("REASON").as_entire_binding(),
+    |                                                             +++++++++++++++++
+
+error[E0308]: mismatched types
+   --> src\main.rs:459:64
+    |
+459 |                       self.bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+    |  ______________________________________________-----------------_^
+    | |                                              |
+    | |                                              arguments to this method are incorrect
+460 | |                         label: Some("Invariants Bind Group"),
+461 | |                         layout: &bind_group_layout,
+462 | |                         entries: &[
+...   |
+475 | |                         ],
+476 | |                     });
+    | |_____________________^ expected `eframe::wgpu::BindGroupDescriptor<'_>`, found `wgpu::BindGroupDescriptor<'_>`
+    |
+note: two different versions of crate `wgpu` are being used; two types coming from two different versions of the same crate are different types even if they look the same
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-30.0.0\src\api\bind_group.rs:158:1
+    |
+158 | pub struct BindGroupDescriptor<'a> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the found type `wgpu::BindGroupDescriptor`
+    |
+   ::: C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\bind_group.rs:158:1
+    |
+158 | pub struct BindGroupDescriptor<'a> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the expected type `eframe::wgpu::BindGroupDescriptor`
+    |
+   ::: src\main.rs:3:5
+    |
+  3 | use eframe::egui;
+    |     ------ one version of crate `wgpu` used here, as a dependency of crate `egui_wgpu`
+...
+343 |     pub compute_pipeline: Option<wgpu::ComputePipeline>,
+    |                                  ---- one version of crate `wgpu` used here, as a direct dependency of the current crate
+    = help: you can use `cargo tree` to explore your dependency tree
+note: method defined here
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\device.rs:232:12
+    |
+232 |     pub fn create_bind_group(&self, desc: &BindGroupDescriptor<'_>) -> BindGroup {
+    |            ^^^^^^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+   --> src\main.rs:459:39
+    |
+459 |                       self.bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+    |  _____________________---------------___^
+    | |                     |
+    | |                     expected due to the type of this binding
+460 | |                         label: Some("Invariants Bind Group"),
+461 | |                         layout: &bind_group_layout,
+462 | |                         entries: &[
+...   |
+475 | |                         ],
+476 | |                     });
+    | |______________________^ expected `Option<BindGroup>`, found `BindGroup`
+    |
+    = note: expected enum `Option<wgpu::BindGroup>`
+             found struct `eframe::wgpu::BindGroup`
+
+error[E0308]: mismatched types
+   --> src\main.rs:482:62
+    |
+482 |                       let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+    |  _________________________________________--------------------_^
+    | |                                         |
+    | |                                         arguments to this method are incorrect
+483 | |                         label: Some("Spacetime Curvature Shader"),
+484 | |                         source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!("points.wgsl"))),
+485 | |                     });
+    | |_____________________^ expected `eframe::wgpu::ShaderModuleDescriptor<'_>`, found `wgpu::ShaderModuleDescriptor<'_>`
+    |
+note: two different versions of crate `wgpu` are being used; two types coming from two different versions of the same crate are different types even if they look the same
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-30.0.0\src\api\shader_module.rs:223:1
+    |
+223 | pub struct ShaderModuleDescriptor<'a> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the found type `wgpu::ShaderModuleDescriptor`
+    |
+   ::: C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\shader_module.rs:223:1
+    |
+223 | pub struct ShaderModuleDescriptor<'a> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the expected type `eframe::wgpu::ShaderModuleDescriptor`
+    |
+   ::: src\main.rs:3:5
+    |
+  3 | use eframe::egui;
+    |     ------ one version of crate `wgpu` used here, as a dependency of crate `egui_wgpu`
+...
+343 |     pub compute_pipeline: Option<wgpu::ComputePipeline>,
+    |                                  ---- one version of crate `wgpu` used here, as a direct dependency of the current crate
+    = help: you can use `cargo tree` to explore your dependency tree
+note: method defined here
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\device.rs:139:12
+    |
+139 |     pub fn create_shader_module(&self, desc: ShaderModuleDescriptor<'_>) -> ShaderModule {
+    |            ^^^^^^^^^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+   --> src\main.rs:489:52
+    |
+489 |                         bind_group_layouts: &[Some(&bind_group_layout)],
+    |                                               ---- ^^^^^^^^^^^^^^^^^^ expected `wgpu::BindGroupLayout`, found `eframe::wgpu::BindGroupLayout`
+    |                                               |
+    |                                               arguments to this enum variant are incorrect
+    |
+note: two different versions of crate `wgpu` are being used; two types coming from two different versions of the same crate are different types even if they look the same
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\bind_group_layout.rs:15:1
+    |
+ 15 | pub struct BindGroupLayout {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the found type `eframe::wgpu::BindGroupLayout`
+    |
+   ::: C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-30.0.0\src\api\bind_group_layout.rs:15:1
+    |
+ 15 | pub struct BindGroupLayout {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the expected type `wgpu::BindGroupLayout`
+    |
+   ::: src\main.rs:3:5
+    |
+  3 | use eframe::egui;
+    |     ------ one version of crate `wgpu` used here, as a dependency of crate `egui_wgpu`
+...
+343 |     pub compute_pipeline: Option<wgpu::ComputePipeline>,
+    |                                  ---- one version of crate `wgpu` used here, as a direct dependency of the current crate
+    = help: you can use `cargo tree` to explore your dependency tree
+help: the type constructed contains `&eframe::wgpu::BindGroupLayout` due to the type of the argument passed
+   --> src\main.rs:489:47
+    |
+489 |                         bind_group_layouts: &[Some(&bind_group_layout)],
+    |                                               ^^^^^------------------^
+    |                                                    |
+    |                                                    this argument influences the type of `Some`
+note: tuple variant defined here
+   --> C:\Users\taxi\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\core\src\option.rs:607:5
+    |
+607 |     Some(#[stable(feature = "rust1", since = "1.0.0")] T),
+    |     ^^^^
+
+error[E0308]: mismatched types
+   --> src\main.rs:487:73
+    |
+487 |                       let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+    |  __________________________________________________----------------------_^
+    | |                                                  |
+    | |                                                  arguments to this method are incorrect
+488 | |                         label: Some("Compute Pipeline Layout"),
+489 | |                         bind_group_layouts: &[Some(&bind_group_layout)],
+490 | |                         immediate_size: 0,
+491 | |                     });
+    | |_____________________^ expected `PipelineLayoutDescriptor<'_>`, found `wgpu::PipelineLayoutDescriptor<'_>`
+    |
+note: two different versions of crate `wgpu` are being used; two types coming from two different versions of the same crate are different types even if they look the same
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-30.0.0\src\api\pipeline_layout.rs:33:1
+    |
+ 33 | pub struct PipelineLayoutDescriptor<'a> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the found type `wgpu::PipelineLayoutDescriptor`
+    |
+   ::: C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\pipeline_layout.rs:33:1
+    |
+ 33 | pub struct PipelineLayoutDescriptor<'a> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the expected type `eframe::wgpu::PipelineLayoutDescriptor`
+    |
+   ::: src\main.rs:3:5
+    |
+  3 | use eframe::egui;
+    |     ------ one version of crate `wgpu` used here, as a dependency of crate `egui_wgpu`
+...
+343 |     pub compute_pipeline: Option<wgpu::ComputePipeline>,
+    |                                  ---- one version of crate `wgpu` used here, as a direct dependency of the current crate
+    = help: you can use `cargo tree` to explore your dependency tree
+note: method defined here
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\device.rs:249:12
+    |
+249 |     pub fn create_pipeline_layout(&self, desc: &PipelineLayoutDescriptor<'_>) -> PipelineLayout {
+    |            ^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+   --> src\main.rs:495:38
+    |
+495 |                         layout: Some(&pipeline_layout),
+    |                                 ---- ^^^^^^^^^^^^^^^^ expected `wgpu::PipelineLayout`, found `eframe::wgpu::PipelineLayout`
+    |                                 |
+    |                                 arguments to this enum variant are incorrect
+    |
+note: two different versions of crate `wgpu` are being used; two types coming from two different versions of the same crate are different types even if they look the same
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-30.0.0\src\api\pipeline_layout.rs:10:1
+    |
+ 10 | pub struct PipelineLayout {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^ this is the expected type `wgpu::PipelineLayout`
+    |
+   ::: C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\pipeline_layout.rs:10:1
+    |
+ 10 | pub struct PipelineLayout {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^ this is the found type `eframe::wgpu::PipelineLayout`
+    |
+   ::: src\main.rs:3:5
+    |
+  3 | use eframe::egui;
+    |     ------ one version of crate `wgpu` used here, as a dependency of crate `egui_wgpu`
+...
+343 |     pub compute_pipeline: Option<wgpu::ComputePipeline>,
+    |                                  ---- one version of crate `wgpu` used here, as a direct dependency of the current crate
+    = help: you can use `cargo tree` to explore your dependency tree
+help: the type constructed contains `&eframe::wgpu::PipelineLayout` due to the type of the argument passed
+   --> src\main.rs:495:33
+    |
+495 |                         layout: Some(&pipeline_layout),
+    |                                 ^^^^^----------------^
+    |                                      |
+    |                                      this argument influences the type of `Some`
+note: tuple variant defined here
+   --> C:\Users\taxi\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\core\src\option.rs:607:5
+    |
+607 |     Some(#[stable(feature = "rust1", since = "1.0.0")] T),
+    |     ^^^^
+
+error[E0308]: mismatched types
+   --> src\main.rs:496:33
+    |
+496 |                         module: &shader,
+    |                                 ^^^^^^^ expected `wgpu::ShaderModule`, found `eframe::wgpu::ShaderModule`
+    |
+note: two different versions of crate `wgpu` are being used; two types coming from two different versions of the same crate are different types even if they look the same
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-30.0.0\src\api\shader_module.rs:15:1
+    |
+ 15 | pub struct ShaderModule {
+    | ^^^^^^^^^^^^^^^^^^^^^^^ this is the expected type `wgpu::ShaderModule`
+    |
+   ::: C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\shader_module.rs:15:1
+    |
+ 15 | pub struct ShaderModule {
+    | ^^^^^^^^^^^^^^^^^^^^^^^ this is the found type `eframe::wgpu::ShaderModule`
+    |
+   ::: src\main.rs:3:5
+    |
+  3 | use eframe::egui;
+    |     ------ one version of crate `wgpu` used here, as a dependency of crate `egui_wgpu`
+...
+343 |     pub compute_pipeline: Option<wgpu::ComputePipeline>,
+    |                                  ---- one version of crate `wgpu` used here, as a direct dependency of the current crate
+    = help: you can use `cargo tree` to explore your dependency tree
+
+error[E0308]: mismatched types
+   --> src\main.rs:493:76
+    |
+493 |                       self.compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+    |  ____________________________________________________-----------------------_^
+    | |                                                    |
+    | |                                                    arguments to this method are incorrect
+494 | |                         label: Some("Spacetime Compute Pipeline"),
+495 | |                         layout: Some(&pipeline_layout),
+496 | |                         module: &shader,
+...   |
+499 | |                         cache: None,
+500 | |                     });
+    | |_____________________^ expected `ComputePipelineDescriptor<'_>`, found `wgpu::ComputePipelineDescriptor<'_>`
+    |
+note: two different versions of crate `wgpu` are being used; two types coming from two different versions of the same crate are different types even if they look the same
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-30.0.0\src\api\compute_pipeline.rs:45:1
+    |
+ 45 | pub struct ComputePipelineDescriptor<'a> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the found type `wgpu::ComputePipelineDescriptor`
+    |
+   ::: C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\compute_pipeline.rs:45:1
+    |
+ 45 | pub struct ComputePipelineDescriptor<'a> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the expected type `eframe::wgpu::ComputePipelineDescriptor`
+    |
+   ::: src\main.rs:3:5
+    |
+  3 | use eframe::egui;
+    |     ------ one version of crate `wgpu` used here, as a dependency of crate `egui_wgpu`
+...
+343 |     pub compute_pipeline: Option<wgpu::ComputePipeline>,
+    |                                  ---- one version of crate `wgpu` used here, as a direct dependency of the current crate
+    = help: you can use `cargo tree` to explore your dependency tree
+note: method defined here
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\device.rs:270:12
+    |
+270 |     pub fn create_compute_pipeline(&self, desc: &ComputePipelineDescriptor<'_>) -> ComputePipeline {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+   --> src\main.rs:493:45
+    |
+493 |                       self.compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+    |  _____________________---------------------___^
+    | |                     |
+    | |                     expected due to the type of this binding
+494 | |                         label: Some("Spacetime Compute Pipeline"),
+495 | |                         layout: Some(&pipeline_layout),
+496 | |                         module: &shader,
+...   |
+499 | |                         cache: None,
+500 | |                     });
+    | |______________________^ expected `Option<ComputePipeline>`, found `ComputePipeline`
+    |
+    = note: expected enum `Option<wgpu::ComputePipeline>`
+             found struct `eframe::wgpu::ComputePipeline`
+
+error[E0308]: mismatched types
+   --> src\main.rs:502:64
+    |
+502 |                       self.staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+    |  __________________________________________________-------------_^
+    | |                                                  |
+    | |                                                  arguments to this method are incorrect
+503 | |                         label: Some("Staging Buffer for Reading Output"),
+504 | |                         size: output_buffer_size,
+505 | |                         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+506 | |                         mapped_at_creation: false,
+507 | |                     });
+    | |_____________________^ expected `BufferDescriptor<Option<&str>>`, found a different `BufferDescriptor<Option<&str>>`
+    |
+note: two different versions of crate `wgpu_types` are being used; two types coming from two different versions of the same crate are different types even if they look the same
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-types-30.0.0\src\buffer.rs:14:1
+    |
+ 14 | pub struct BufferDescriptor<L> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the found type `wgpu::wgpu_types::BufferDescriptor`
+    |
+   ::: C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-types-29.0.4\src\buffer.rs:14:1
+    |
+ 14 | pub struct BufferDescriptor<L> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the expected type `eframe::wgpu::wgpu_types::BufferDescriptor`
+    |
+   ::: src\main.rs:3:5
+    |
+  3 | use eframe::egui;
+    |     ------ one version of crate `wgpu_types` used here, as a dependency of crate `wgpu_hal`
+...
+343 |     pub compute_pipeline: Option<wgpu::ComputePipeline>,
+    |                                  ---- one version of crate `wgpu_types` used here, as a dependency of crate `wgpu_hal`
+    = help: you can use `cargo tree` to explore your dependency tree
+note: method defined here
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\device.rs:277:12
+    |
+277 |     pub fn create_buffer(&self, desc: &BufferDescriptor<'_>) -> Buffer {
+    |            ^^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+   --> src\main.rs:502:43
+    |
+502 |                       self.staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+    |  _____________________-------------------___^
+    | |                     |
+    | |                     expected due to the type of this binding
+503 | |                         label: Some("Staging Buffer for Reading Output"),
+504 | |                         size: output_buffer_size,
+505 | |                         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+506 | |                         mapped_at_creation: false,
+507 | |                     });
+    | |______________________^ expected `Option<Buffer>`, found `Buffer`
+    |
+    = note: expected enum `Option<wgpu::Buffer>`
+             found struct `eframe::wgpu::Buffer`
+
+error[E0308]: mismatched types
+   --> src\main.rs:535:65
+    |
+535 |                   let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+    |  __________________________________________----------------------_^
+    | |                                          |
+    | |                                          arguments to this method are incorrect
+536 | |                     label: Some("Spacetime Command Encoder"),
+537 | |                 });
+    | |_________________^ expected `CommandEncoderDescriptor<Option<&str>>`, found a different `CommandEncoderDescriptor<Option<&str>>`
+    |
+note: two different versions of crate `wgpu_types` are being used; two types coming from two different versions of the same crate are different types even if they look the same
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-types-30.0.0\src\lib.rs:307:1
+    |
+307 | pub struct CommandEncoderDescriptor<L> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the found type `wgpu::wgpu_types::CommandEncoderDescriptor`
+    |
+   ::: C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-types-29.0.4\src\lib.rs:360:1
+    |
+360 | pub struct CommandEncoderDescriptor<L> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the expected type `eframe::wgpu::wgpu_types::CommandEncoderDescriptor`
+    |
+   ::: src\main.rs:3:5
+    |
+  3 | use eframe::egui;
+    |     ------ one version of crate `wgpu_types` used here, as a dependency of crate `wgpu_hal`
+...
+343 |     pub compute_pipeline: Option<wgpu::ComputePipeline>,
+    |                                  ---- one version of crate `wgpu_types` used here, as a dependency of crate `wgpu_hal`
+    = help: you can use `cargo tree` to explore your dependency tree
+note: method defined here
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\device.rs:207:12
+    |
+207 |     pub fn create_command_encoder(&self, desc: &CommandEncoderDescriptor<'_>) -> CommandEncoder {
+    |            ^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+   --> src\main.rs:540:71
+    |
+540 |                       let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+    |  ____________________________________________________------------------_^
+    | |                                                    |
+    | |                                                    arguments to this method are incorrect
+541 | |                         label: Some("Spacetime Compute Pass"),
+542 | |                         timestamp_writes: None,
+543 | |                     });
+    | |_____________________^ expected `eframe::wgpu::ComputePassDescriptor<'_>`, found `wgpu::ComputePassDescriptor<'_>`
+    |
+note: two different versions of crate `wgpu` are being used; two types coming from two different versions of the same crate are different types even if they look the same
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-30.0.0\src\api\compute_pass.rs:236:1
+    |
+236 | pub struct ComputePassDescriptor<'a> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the found type `wgpu::ComputePassDescriptor`
+    |
+   ::: C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\compute_pass.rs:189:1
+    |
+189 | pub struct ComputePassDescriptor<'a> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the expected type `eframe::wgpu::ComputePassDescriptor`
+    |
+   ::: src\main.rs:3:5
+    |
+  3 | use eframe::egui;
+    |     ------ one version of crate `wgpu` used here, as a dependency of crate `egui_wgpu`
+...
+343 |     pub compute_pipeline: Option<wgpu::ComputePipeline>,
+    |                                  ---- one version of crate `wgpu` used here, as a direct dependency of the current crate
+    = help: you can use `cargo tree` to explore your dependency tree
+note: method defined here
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\command_encoder.rs:98:12
+    |
+ 98 |     pub fn begin_compute_pass<'encoder>(
+    |            ^^^^^^^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+   --> src\main.rs:544:47
+    |
+544 |                     compute_pass.set_pipeline(pipeline);
+    |                                  ------------ ^^^^^^^^ expected `eframe::wgpu::ComputePipeline`, found `wgpu::ComputePipeline`
+    |                                  |
+    |                                  arguments to this method are incorrect
+    |
+note: two different versions of crate `wgpu` are being used; two types coming from two different versions of the same crate are different types even if they look the same
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-30.0.0\src\api\compute_pipeline.rs:10:1
+    |
+ 10 | pub struct ComputePipeline {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the found type `wgpu::ComputePipeline`
+    |
+   ::: C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\compute_pipeline.rs:10:1
+    |
+ 10 | pub struct ComputePipeline {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the expected type `eframe::wgpu::ComputePipeline`
+    |
+   ::: src\main.rs:3:5
+    |
+  3 | use eframe::egui;
+    |     ------ one version of crate `wgpu` used here, as a dependency of crate `egui_wgpu`
+...
+343 |     pub compute_pipeline: Option<wgpu::ComputePipeline>,
+    |                                  ---- one version of crate `wgpu` used here, as a direct dependency of the current crate
+    = help: you can use `cargo tree` to explore your dependency tree
+note: method defined here
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\compute_pass.rs:67:12
+    |
+ 67 |     pub fn set_pipeline(&mut self, pipeline: &ComputePipeline) {
+    |            ^^^^^^^^^^^^
+
+error[E0277]: the trait bound `Option<&eframe::wgpu::BindGroup>: From<&wgpu::BindGroup>` is not satisfied
+   --> src\main.rs:545:52
+    |
+545 |                     compute_pass.set_bind_group(0, bg, &[]);
+    |                                  --------------    ^^ the trait `From<&wgpu::BindGroup>` is not implemented for `Option<&eframe::wgpu::BindGroup>`
+    |                                  |
+    |                                  required by a bound introduced by this call
+    |
+    = help: the following other types implement trait `From<T>`:
+              `Option<&T>` implements `From<&Option<T>>`
+              `Option<&mut T>` implements `From<&mut Option<T>>`
+              `Option<&tracing_core::metadata::Metadata<'_>>` implements `From<&tracing_core::span::Current>`
+              `Option<&tracing_core::span::Id>` implements `From<&tracing::span::EnteredSpan>`
+              `Option<&tracing_core::span::Id>` implements `From<&tracing::span::Span>`
+              `Option<&tracing_core::span::Id>` implements `From<&tracing_core::span::Current>`
+              `Option<T>` implements `From<T>`
+              `Option<either::Either<A, B>>` implements `From<itertools::either_or_both::EitherOrBoth<A, B>>`
+            and 7 others
+note: required by a bound in `eframe::wgpu::ComputePass::<'_>::set_bind_group`
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\compute_pass.rs:59:32
+    |
+ 57 |     pub fn set_bind_group<'a, BG>(&mut self, index: u32, bind_group: BG, offsets: &[DynamicOffset])
+    |            -------------- required by a bound in this associated function
+ 58 |     where
+ 59 |         Option<&'a BindGroup>: From<BG>,
+    |                                ^^^^^^^^ required by this bound in `ComputePass::<'_>::set_bind_group`
+
+error[E0308]: arguments to this method are incorrect
+   --> src\main.rs:556:25
+    |
+556 |                 encoder.copy_buffer_to_buffer(out_buf, 0, stg_buf, 0, output_buffer_size);
+    |                         ^^^^^^^^^^^^^^^^^^^^^ -------     ------- expected `eframe::wgpu::Buffer`, found `wgpu::Buffer`
+    |                                               |
+    |                                               expected `eframe::wgpu::Buffer`, found `wgpu::Buffer`
+    |
+note: two different versions of crate `wgpu` are being used; two types coming from two different versions of the same crate are different types even if they look the same
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-30.0.0\src\api\buffer.rs:222:1
+    |
+222 | pub struct Buffer {
+    | ^^^^^^^^^^^^^^^^^ this is the found type `wgpu::Buffer`
+    |
+   ::: C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\buffer.rs:221:1
+    |
+221 | pub struct Buffer {
+    | ^^^^^^^^^^^^^^^^^ this is the expected type `eframe::wgpu::Buffer`
+    |
+   ::: src\main.rs:3:5
+    |
+  3 | use eframe::egui;
+    |     ------ one version of crate `wgpu` used here, as a dependency of crate `egui_wgpu`
+...
+343 |     pub compute_pipeline: Option<wgpu::ComputePipeline>,
+    |                                  ---- one version of crate `wgpu` used here, as a direct dependency of the current crate
+    = help: you can use `cargo tree` to explore your dependency tree
+note: two different versions of crate `wgpu` are being used; two types coming from two different versions of the same crate are different types even if they look the same
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-30.0.0\src\api\buffer.rs:222:1
+    |
+222 | pub struct Buffer {
+    | ^^^^^^^^^^^^^^^^^ this is the found type `wgpu::Buffer`
+    |
+   ::: C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\buffer.rs:221:1
+    |
+221 | pub struct Buffer {
+    | ^^^^^^^^^^^^^^^^^ this is the expected type `eframe::wgpu::Buffer`
+    |
+   ::: src\main.rs:3:5
+    |
+  3 | use eframe::egui;
+    |     ------ one version of crate `wgpu` used here, as a dependency of crate `egui_wgpu`
+...
+343 |     pub compute_pipeline: Option<wgpu::ComputePipeline>,
+    |                                  ---- one version of crate `wgpu` used here, as a direct dependency of the current crate
+    = help: you can use `cargo tree` to explore your dependency tree
+note: method defined here
+   --> C:\Users\taxi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-29.0.4\src\api\command_encoder.rs:117:12
+    |
+117 |     pub fn copy_buffer_to_buffer(
+    |            ^^^^^^^^^^^^^^^^^^^^^
+
+Some errors have detailed explanations: E0277, E0308, E0425, E0599, E0609.
+For more information about an error, try `rustc --explain E0277`.
+error: could not compile `spacetime` (bin "spacetime") due to 32 previous errors
+
+C:\rust\spacetime>
