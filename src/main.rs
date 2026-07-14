@@ -1,5 +1,6 @@
 use bytemuck::*;
-use wgpu::util::DeviceExt; // Ez a trait kell a könyvjelző-alapú buffer létrehozáshoz
+//use wgpu::util::DeviceExt; // Ez a trait kell a könyvjelző-alapú buffer létrehozáshoz
+use eframe::egui;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -11,7 +12,7 @@ struct GridDimensions {
 }
 
 // Egy aszinkron függvény, mivel a wgpu inicializálása async
-async fn run() {
+/*async fn run() {
     // 1. Definiáljuk a rács méreteit (pl. egy 64x64x64-es kocka a térben)
     let width = 64;
     let height = 64;
@@ -23,21 +24,21 @@ async fn run() {
     
     // --- Tesztadatok feltöltése (opcionális példa a teszteléshez) ---
     // Itt szimulálhatsz egy kezdeti Minkowski (sík) metrikát: g00=-1, g11=1, g22=1, g33=1
-    for point in grid.data.iter_mut() {
-        point.g00 = -1.0;
-        point.g11 = 1.0;
-        point.g22 = 1.0;
-        point.g33 = 1.0;
-    }
+    //for point in grid.data.iter_mut() {
+    //    point.g00 = -1.0;
+    //    point.g11 = 1.0;
+    //    point.g22 = 1.0;
+    //    point.g33 = 1.0;
+    //}
 
-    // 2. Alapvető WGPU objektumok inicializálása (Instance, Adapter, Device, Queue)
+    // JAVÍTOTT RÉSZ: DX12 helyett VULKAN backendet használunk!
+    // Ez a fordító zseniálisan kezeli a komplex, egymásba ágyazott tenzorszámítási ciklusokat.
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        backends: wgpu::Backends::DX12, // Kényszerített DX12 a Vulkan crash elkerülésére
+        backends: wgpu::Backends::VULKAN, // Kényszerített Vulkan háttérmotor
         flags: wgpu::InstanceFlags::default(),
         backend_options: wgpu::BackendOptions::default(),
-        display: None, // Compute (ablak nélküli) feladatoknál ez fixen None
-        memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(), // Alapértelmezett memóriakorlátok
-
+        display: None,
+        memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
     });
 
     let adapter = instance
@@ -56,11 +57,9 @@ async fn run() {
             &wgpu::DeviceDescriptor {
                 label: Some("Spacetime Device"),
                 required_features: wgpu::Features::empty(),
-                // Új kötelező mező: letiltjuk a kísérleti funkciókat a stabilitásért
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 required_limits: wgpu::Limits::default(),
                 memory_hints: wgpu::MemoryHints::default(),
-                // Új kötelező mező: kikapcsoljuk az API hívások nyomon követését (fájlba írását)
                 trace: wgpu::Trace::Off,
             },
         )
@@ -92,7 +91,7 @@ async fn run() {
     // Ide fogja a GPU írni a rácspontonkénti 1 darab f32-es eredményt (pl. Kretschmann-skálát)
     let total_points = (width * height * depth) as u64;
     let output_buffer_size = total_points * std::mem::size_of::<f32>() as u64;
-    
+
     let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("Output Invariants Buffer"),
         size: output_buffer_size,
@@ -280,11 +279,310 @@ async fn run() {
         eprintln!("Hiba történt a GPU buffer aszinkron map-elése közben!");
     }
     
+}*/
+
+fn main() -> eframe::Result<()> {
+    /*let has_wgpu = pollster::block_on(check_wgpu_support());
+    
+    let renderer = if has_wgpu {
+        println!("WGPU támogatott, Shader mód bekapcsolva.");
+        eframe::Renderer::Wgpu
+    } else {
+        println!("WGPU nem elérhető. Váltás GLOW (OpenGL) módra - CPU fallback.");
+        eframe::Renderer::Glow
+    };*/
+
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_resizable(false)
+            .with_inner_size([800.0, 600.0]),
+        //renderer: renderer,
+        ..Default::default()
+    };
+
+    //let options = eframe::NativeOptions::default();
+    eframe::run_native(
+        "Spacetime Curvature Explorer",
+        options,
+        Box::new(|cc|
+            Ok(Box::new(SpacetimeApp::new(cc)))),
+    )
+    // Mivel a wgpu async, elindítjuk a futtató környezetet
+    //pollster::block_on(run());
 }
 
-fn main() {
-    // Mivel a wgpu async, elindítjuk a futtató környezetet
-    pollster::block_on(run());
+/*async fn check_wgpu_support() -> bool {
+    let instance = wgpu::Instance::default();
+    // Megpróbálunk egy adaptert kérni (High Performance)
+    let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        force_fallback_adapter: false,
+        compatible_surface: None,
+    }).await;
+
+    // Ha van adapter, és támogatja a shadereinket (pl. BC compression vagy float filtering)
+    if let Ok(a) = adapter {
+        let info = a.get_info();
+        let name = info.name.to_lowercase();
+        if name.contains("mesa") || name.contains("svga3d") || name.contains("llvmpipe") {
+            println!("Virtualizált GPU detektálva ({}), biztonsági okokból Glow módra váltunk.", info.name);
+            return false; 
+        }
+        let limits = a.limits();
+        println!("GPU találva: {}, Max Texture: {}", a.get_info().name, limits.max_texture_dimension_2d);
+        true
+    } else {
+        false
+    }
+}*/
+
+
+struct SpacetimeApp {
+    pub grid: SpacetimeGrid,
+    pub pipeline_initialized: bool,
+    pub compute_pipeline: Option<wgpu::ComputePipeline>,
+    pub bind_group: Option<wgpu::BindGroup>,
+    pub input_buffer: Option<wgpu::Buffer>,
+    pub output_buffer: Option<wgpu::Buffer>,
+    pub staging_buffer: Option<wgpu::Buffer>,
+}
+
+impl SpacetimeApp {
+    fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        let width = 64;
+        let height = 64;
+        let depth = 64;
+        let dx: f32 = 0.1;
+        let grid = SpacetimeGrid::new(width, height, depth, dx);
+        
+        Self {
+            grid,
+            pipeline_initialized: false,
+            compute_pipeline: None,
+            bind_group: None,
+            input_buffer: None,
+            output_buffer: None,
+            staging_buffer: None,
+        }
+    }
+}
+
+impl eframe::App for SpacetimeApp {
+    fn logic(&mut self, _ctx: &egui::Context, _: &mut eframe::Frame) {
+    }
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        if let Some(render_state) = frame.wgpu_render_state() {
+            let device = &render_state.device;
+            let queue = &render_state.queue;
+            if !self.pipeline_initialized {
+                let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+                    backends: wgpu::Backends::VULKAN, // Marad a jól működő Vulkan
+                    flags: wgpu::InstanceFlags::default(),
+                    backend_options: wgpu::BackendOptions::default(),
+                    display: None,
+                    memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
+                });
+
+                let adapter_result = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::HighPerformance,
+                    compatible_surface: None,
+                    force_fallback_adapter: false,
+                    apply_limit_buckets: false, // Az eframe-nél ez már kötelező
+                }));
+                if let Ok(adapter) = adapter_result {
+                    // Ide másolható az összes korábbi input_buffer, output_buffer és pipeline inicializáció!
+                    
+                    self.input_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Input Spacetime Grid Buffer"),
+                        contents: bytemuck::cast_slice(&self.grid.data),
+                        // STORAGE: elérhető a compute shaderben, COPY_DST: írható a CPU felől később is
+                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    });
+
+                    let dims_data = GridDimensions { width:self.width, height:self.height, depth:self.depth, dx: self.dx };
+                    let dims_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Grid Dimensions Uniform Buffer"),
+                        contents: bytemuck::bytes_of(&dims_data),
+                        usage: wgpu::BufferUsages::UNIFORM,
+                    });
+
+                    let total_points = (self.width * self.height * self.depth) as u64;
+                    let output_buffer_size = total_points * std::mem::size_of::<f32>() as u64;
+
+                    self.output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("Output Invariants Buffer"),
+                        size: output_buffer_size,
+                        // STORAGE: a shader írja, COPY_SRC: átmásolhatjuk egy staging bufferbe, hogy a CPU kiolvassa
+                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                        mapped_at_creation: false,
+                    });
+
+                    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label: Some("Invariants Bind Group Layout"),
+                        entries: &[
+                            // Binding 0: Dimenziók (Uniform)
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 0,
+                                visibility: wgpu::ShaderStages::COMPUTE,
+                                ty: wgpu::BindingType::Buffer {
+                                    ty: wgpu::BufferBindingType::Uniform,
+                                    has_dynamic_offset: false,
+                                    min_binding_size: None,
+                                },
+                                count: None,
+                            },
+                            // Binding 1: Bemeneti metrika rács (Storage, Read-only)
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 1,
+                                visibility: wgpu::ShaderStages::COMPUTE,
+                                ty: wgpu::BindingType::Buffer {
+                                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                    has_dynamic_offset: false,
+                                    min_binding_size: None,
+                                },
+                                count: None,
+                            },
+                            // Binding 2: Kimeneti invariánsok (Storage, Read-write)
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 2,
+                                visibility: wgpu::ShaderStages::COMPUTE,
+                                ty: wgpu::BindingType::Buffer {
+                                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                    has_dynamic_offset: false,
+                                    min_binding_size: None,
+                                },
+                                count: None,
+                            },
+                        ],
+                    });
+
+                    self.bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("Invariants Bind Group"),
+                        layout: &bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: dims_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: self.input_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: self.output_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+
+                    println!("Minden buffer sikeresen inicializálva a GPU-n!");
+                    println!("Bemeneti buffer mérete: {} bájt", self.grid.data.len() * std::mem::size_of::<MetricPoint>());
+                    println!("Kimeneti buffer mérete: {} bájt", output_buffer_size);
+
+                    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                        label: Some("Spacetime Curvature Shader"),
+                        source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!("points.wgsl"))),
+                    });
+
+                    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("Compute Pipeline Layout"),
+                        bind_group_layouts: &[Some(&bind_group_layout)],
+                        immediate_size: 0,
+                    });
+
+                    self.compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                        label: Some("Spacetime Compute Pipeline"),
+                        layout: Some(&pipeline_layout),
+                        module: &shader,
+                        entry_point: Some("main"), // A WGSL-ben szereplő fn main() neve
+                        compilation_options: wgpu::PipelineCompilationOptions::default(),
+                        cache: None,
+                    });
+
+                    self.staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("Staging Buffer for Reading Output"),
+                        size: output_buffer_size,
+                        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    });
+
+
+
+
+                }
+                println!("A Riemann-csővezeték sikeresen és stabilan rákapcsolódott a GUI-ra!");
+                self.pipeline_initialized = true;
+            }
+        }
+        ui.heading("Módosított Téregyenlet Szimulátor");
+        ui.separator();
+        ui.label(format!("Rács mérete: {}x{}x{}", self.grid.width, self.grid.height, self.grid.depth));
+        if ui.button("Görbületi Feszültség Számítása").clicked() {
+            println!("Compute parancs kiadva a GPU-nak az interfészről...");
+
+            // 1. Biztonsági ellenőrzés: csak akkor futunk le, ha a pipeline már inicializálva van
+            if let (Some(pipeline), Some(bg), Some(out_buf), Some(stg_buf), Some(render_state)) = (
+                &self.compute_pipeline,
+                &self.bind_group,
+                &self.output_buffer,
+                &self.staging_buffer,
+                frame.wgpu_render_state() // Újra elkérjük a queue eléréséhez
+            ) {
+                let device = &render_state.device;
+                let queue = &render_state.queue;
+
+                // 2. Parancsok összeállítása (Command Encoder)
+                let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Spacetime Command Encoder"),
+                });
+
+                {
+                    let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("Spacetime Compute Pass"),
+                        timestamp_writes: None,
+                    });
+                    compute_pass.set_pipeline(pipeline);
+                    compute_pass.set_bind_group(0, bg, &[]);
+
+                    // Munkacsoportok indítása (Vulkan-kompatibilis 4x4x4-es kockák)
+                    let workgroups_x = (self.grid.width + 3) / 4;
+                    let workgroups_y = (self.grid.height + 3) / 4;
+                    let workgroups_z = (self.grid.depth + 3) / 4;
+                    compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+                }
+
+                // 3. Adatmásolás a staging bufferbe
+                let output_buffer_size = (self.grid.width * self.grid.height * self.grid.depth) as u64 * std::mem::size_of::<f32>() as u64;
+                encoder.copy_buffer_to_buffer(out_buf, 0, stg_buf, 0, output_buffer_size);
+                
+                // Beküldés a GPU-nak
+                queue.submit(std::iter::once(encoder.finish()));
+
+                // 4. Aszinkron visszaolvasás a GPU-ról (Már tesztelt, v30-kompatibilis verzió)
+                let buffer_slice = stg_buf.slice(..);
+                let (tx, rx) = std::sync::mpsc::channel();
+                
+                buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+                    tx.send(result).unwrap();
+                });
+
+                // Parancsok átpörgetése a háttérben
+                instance.poll_all(true); 
+
+                if let Ok(Ok(())) = rx.recv() {
+                    if let Ok(data_view) = buffer_slice.get_mapped_range() {
+                        let result_invariants: &[f32] = bytemuck::cast_slice(&data_view);
+
+                        println!("Sikeres számítás! Első 3 rácspont görbületi feszültsége:");
+                        println!(": {}, [1]: {}, [2]: {}", result_invariants[0], result_invariants[1], result_invariants[2]);
+
+                        drop(data_view);
+                        stg_buf.unmap();
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[repr(C)]

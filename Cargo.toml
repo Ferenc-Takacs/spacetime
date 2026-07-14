@@ -6,5 +6,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 bytemuck = { version = "1.25.1", features = ["derive"] }
+eframe = { version = "0.35.0", features = ["wgpu"] }
+egui-wgpu = "0.35.0"
 pollster = "1.0.1"
 wgpu = { version = "30.0.0", features = ["fragile-send-sync-non-atomic-wasm"] }
