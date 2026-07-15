@@ -233,7 +233,7 @@ impl eframe::App for SpacetimeApp {
 
                 // A WGPU belső állapotát frissítjük a parancsok végrehajtásához
                 // v0.35 asztali környezetben az instance helyett közvetlenül a device.poll() is pörgethető így:
-                device.poll(wgpu::Maintain::wait());
+                device.poll(wgpu::MaintainProcess::wait());
 
                 if let Ok(Ok(())) = rx.recv() {
                     if let Ok(data_view) = buffer_slice.get_mapped_range() {

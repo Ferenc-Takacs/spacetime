@@ -1,11 +1,11 @@
 
 C:\rust\spacetime>cargo run
    Compiling spacetime v0.1.0 (C:\rust\spacetime)
-error[E0433]: failed to resolve: could not find `Maintain` in `wgpu`
+error[E0433]: failed to resolve: could not find `MaintainProcess` in `wgpu`
    --> src\main.rs:236:35
     |
-236 |                 device.poll(wgpu::Maintain::wait());
-    |                                   ^^^^^^^^ could not find `Maintain` in `wgpu`
+236 |                 device.poll(wgpu::MaintainProcess::wait());
+    |                                   ^^^^^^^^^^^^^^^ could not find `MaintainProcess` in `wgpu`
 
 error[E0599]: no method named `create_buffer_init` found for reference `&eframe::wgpu::Device` in the current scope
   --> src\main.rs:75:34
