@@ -55,9 +55,12 @@ struct GpuInterface {
     pub compute_pipeline_2: wgpu::ComputePipeline,
     pub compute_pipeline_3: wgpu::ComputePipeline,
     pub compute_pipeline_4: wgpu::ComputePipeline,
-    pub bind_group: wgpu::BindGroup,
+    pub bind_group_a_to_b: wgpu::BindGroup,
+    pub bind_group_b_to_a: wgpu::BindGroup,
+    pub dims_buffer: wgpu::Buffer,
     pub buffer_a: wgpu::Buffer,
     pub buffer_b: wgpu::Buffer,
+    pub staging_buffer: wgpu::Buffer,
     pub device: Arc<wgpu::Device>,
     pub queue: Arc<wgpu::Queue>,
 }
@@ -142,11 +145,11 @@ impl GpuInterface {
 
         let grid_size = (app.grid.width * app.grid.height * app.grid.depth) as u64;
         let bytes_per_point = std::mem::size_of::<MetricPoint>() as u64; // 44 darab f32 pontonként
-        let buffer_size = grid_size * bytes_per_point;
+        let io_buffer_size = grid_size * bytes_per_point;
 
         let buffer_a = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Spacetime Storage Buffer A"),
-            size: buffer_size,
+            size: io_buffer_size,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
@@ -154,19 +157,39 @@ impl GpuInterface {
 
         let buffer_b = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Spacetime Storage Buffer B"),
-            size: buffer_size,
+            size: io_buffer_size,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
         println!("{}",5);
 
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Spacetime Main Bind Group"),
+        let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Staging Buffer"),
+            size: io_buffer_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        println!("{}",5);
+
+        // BIND GROUP 1: buff_A a múlt (be), buff_B a jövő (ki) -> Páros körök
+        let bind_group_a_to_b = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Bind Group: A to B"),
             layout: &bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: dims_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: buffer_a.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: buffer_b.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: buffer_a.as_entire_binding() }, // Múlt (read_write)
+                wgpu::BindGroupEntry { binding: 2, resource: buffer_b.as_entire_binding() }, // Jövő (read_write)
+            ],
+        });
+
+        // BIND GROUP 2: Szerepek felcserélve! buff_B a múlt, buff_A a jövő -> Páratlan körök
+        let bind_group_b_to_a = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Bind Group: B to A"),
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: dims_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: buffer_b.as_entire_binding() }, // Múlt (read_write)
+                wgpu::BindGroupEntry { binding: 2, resource: buffer_a.as_entire_binding() }, // Jövő (read_write)
             ],
         });
         println!("{}", 6);
@@ -222,14 +245,17 @@ impl GpuInterface {
         println!("A teljes Riemann-csővezeték sikeresen felépült a konstruktorban!");
 
         Some(Self{
-            io_buffer_size: buffer_size,
+            io_buffer_size: io_buffer_size,
             compute_pipeline_1: compute_pipeline_1,
             compute_pipeline_2: compute_pipeline_2,
             compute_pipeline_3: compute_pipeline_3,
             compute_pipeline_4: compute_pipeline_4,
-            bind_group: bind_group,
+            bind_group_a_to_b: bind_group_a_to_b,
+            bind_group_b_to_a: bind_group_b_to_a,
+            dims_buffer: dims_buffer,
             buffer_a: buffer_a,
             buffer_b: buffer_b,
+            staging_buffer: staging_buffer,
             device: device.into(),
             queue: queue.into(),
         })
@@ -291,71 +317,114 @@ impl eframe::App for SpacetimeApp {
                 
                 if let Some(interface) = &self.gpu_interface {
 
+                    let active_bind_group = if self.dims_data.step_index % 2 == 0 {
+                        &interface.bind_group_a_to_b
+                    } else {
+                        &interface.bind_group_b_to_a
+                    };
+                    interface.queue.write_buffer(&interface.dims_buffer, 0, bytemuck::bytes_of(&self.dims_data));
+
                     let mut encoder = interface.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("Spacetime Command Encoder"),
                     });
 
-                    {
-                        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                            label: Some("Spacetime Compute Pass"),
-                            timestamp_writes: None,
-                        });
-                        
-                        // @compute @workgroup_size(4, 4, 4)
-                        let workgroups_x = (self.grid.width + 3) / 4;
-                        let workgroups_y = (self.grid.height + 3) / 4;
-                        let workgroups_z = (self.grid.depth + 3) / 4;
+                    let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("Spacetime Compute Pass"),
+                        timestamp_writes: None,
+                    });
+                    
+                    // @compute @workgroup_size(4, 4, 4)
+                    let workgroups_x = (self.grid.width + 3) / 4;
+                    let workgroups_y = (self.grid.height + 3) / 4;
+                    let workgroups_z = (self.grid.depth + 3) / 4;
+                    
+                    compute_pass.set_bind_group(0, active_bind_group, &[]);
 
-                        compute_pass.set_bind_group(0, &interface.bind_group, &[]);
+                    compute_pass.set_pipeline(&interface.compute_pipeline_1);
+                    compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
 
-                        compute_pass.set_pipeline(&interface.compute_pipeline_1);
-                        compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+                    compute_pass.set_pipeline(&interface.compute_pipeline_2);
+                    compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
 
-                        compute_pass.set_pipeline(&interface.compute_pipeline_2);
-                        compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+                    compute_pass.set_pipeline(&interface.compute_pipeline_3);
+                    compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
 
-                        compute_pass.set_pipeline(&interface.compute_pipeline_3);
-                        compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+                    compute_pass.set_pipeline(&interface.compute_pipeline_4);                        
+                    compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+                    
+                    let future_buffer = if self.dims_data.step_index % 2 == 0 {
+                        &interface.buffer_b // Ha a step_index páros volt, a B pufferbe írt a shader
+                    } else {
+                        &interface.buffer_a // Ha páratlan, az A pufferbe írt
+                    };
 
-                        compute_pass.set_pipeline(&interface.compute_pipeline_4);                        
-                        compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
-                    }
+                    encoder.copy_buffer_to_buffer(
+                        future_buffer,
+                        0,
+                        &interface.staging_buffer,
+                        0,
+                        interface.io_buffer_size, // A teljes rács mérete bájtokban (64x64x64 * 44 * 4)
+                    );
+
                     interface.queue.submit(std::iter::once(encoder.finish()));
-                    let _ = interface.device.poll(wgpu::PollType::wait_indefinitely());
-                    //interface.device.poll(wgpu::Maintain::Wait);
+
+                    let buffer_slice = interface.staging_buffer.slice(..);
+ 
+                    // Létrehozunk egy szálbiztos Atomic bool-t az aszinkron állapot követésére
+                    use std::sync::atomic::{AtomicBool, Ordering};
+                    use std::sync::Arc;
+                    let is_mapped = Arc::new(AtomicBool::new(false));
+                    let is_mapped_clone = is_mapped.clone();
+
+                    // Regisztráljuk a callback-et, ami CSAK átbillenti a flag-et, ha kész a GPU
+                    buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+                        if result.is_ok() {
+                            is_mapped_clone.store(true, Ordering::SeqCst);
+                        }
+                    });
+
+                    // A VÉGTELEN CIKLUS ELLENI VÉDELEM: 
+                    // A Maintain::Wait helyett Maintain::Poll-al pörgetjük a GPU-t a háttérben, 
+                    // így az eframe GUI szálai nem tudják blokkolni a Vulkan eseményhurok folyamatait!
+                    while !is_mapped.load(Ordering::SeqCst) {
+                        let _ = interface.device.poll(wgpu::PollType::Poll);
+                        //device.poll(wgpu::Maintain::Poll);
+                        // Engedünk egy minimális CPU pihenőt, hogy ne pörögjön 100%-on a mag a várakozás alatt
+                        std::thread::yield_now(); 
+                    }
+
                     println!("Az időlépés sikeresen lefutott a videókártyán!");
 
-                    
-                    // Másolás a staging bufferbe
-                    //encoder.copy_buffer_to_buffer(&interface.text_a, 0, &interface.staging_buffer, 0, interface.io_buffer_size);
+                    let data_view = buffer_slice.get_mapped_range();
+                    // F32-es szeletként olvassuk be az adatokat
+                    let result_data: &[f32] = bytemuck::cast_slice(&data_view);
 
-                    // Visszaolvasás a GPU-ról a már jól bevált mpsc csatornával
-                    /*if let Some(staging_buffer) = &interface.staging_buffer {
-                        let buffer_slice = staging_buffer.slice(..);
-                        let (tx, rx) = std::sync::mpsc::channel();
-                        
-                        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
-                            tx.send(result).unwrap();
-                        });
+                    // Kiszámítjuk a rács abszolút középpontjának (32, 32, 32) 1D indexét a 44 f32-es hasábban:
+                    let width = 64; let height = 64;
+                    let x = 31;
+                    let y = 30;
+                    let z = 33;
+                    let center_1d_index = (x + (y * width) + (z * width * height)) * 44;
 
-                        // A WGPU belső állapotát frissítjük a parancsok végrehajtásához
-                        // v0.35 asztali környezetben az instance helyett közvetlenül a device.poll() is pörgethető így:
-                        //device.poll(wgpu::Maintain::Wait);
-                        let _ = interface.device.poll(wgpu::PollType::wait_indefinitely());
+                    // KIÉRTÉKELÉS: Kivesszük a 3. fázis végén a 30..33-as indexekre elmentett 4 skalárt
+                    let r_scalar  = result_data[center_1d_index + 30]; // R
+                    let k_scalar  = result_data[center_1d_index + 31]; // K
+                    let c2_scalar = result_data[center_1d_index + 32]; // C²
+                    let brackets  = result_data[center_1d_index + 33]; // Feszültség
 
-                        if let Ok(Ok(())) = rx.recv() {
-                            let data_view = buffer_slice.get_mapped_range();
-                            let result_invariants: &[f32] = bytemuck::cast_slice(&data_view);
+                    println!("--- Szingularitásmentes Kerr-Toroid Középpont ({},{},{}) ---", x, y, z);
+                    println!("  Ricci görbület (R):     {}", r_scalar);
+                    println!("  Kretschmann skalár (K):  {}", k_scalar);
+                    println!("  Weyl invariáns (C²):     {}", c2_scalar);
+                    println!("  Effektív G Feszültség:  {}", brackets);
 
-                            println!("Sikeres számítás! Első 5 rácspont görbületi feszültsége:");
-                            for i in 0..5 {
-                                println!("  Pont [{}]: {}", i, result_invariants[i]);
-                            }
+                    drop(data_view);
+                    interface.staging_buffer.unmap();
 
-                            drop(data_view);
-                            staging_buffer.unmap();
-                        }
-                    }*/
+                    // 6. LÉPTETJÜK A SZÁMLÁLÓKAT A KÖVETKEZŐ KÖRHÖZ
+                    self.dims_data.step_index += 1;
+                    self.dims_data.init_flag = 0; // Az első időlépés után az inicializáció örökre kikapcsol
+
                 }
             }
         });
