@@ -280,7 +280,7 @@ fn phase1(@builtin(global_invocation_id) coords: vec3<u32>) {
     if ( address<0 ) { return; }
     let g = get_metric(OLD, address, 0);
     let inv = invert_metric(g);
-    set_metric(OLD, address, 0, inv);   // Beírja a múlt inverzébe helyben! (idx=1, is_future=0)
+    set_metric(OLD, address, 1, inv);
 }
 // ==========================================
 
