@@ -504,6 +504,8 @@ impl eframe::App for SpacetimeApp {
                         ui.label(format!("Aktuális időlépés (t): {}", self.dims_data.step_index));
                         ui.label(format!("Keresett skalár minimuma: {}", self.min_val));
                         ui.label(format!("Keresett skalár maximuma: {}", self.max_val));
+                        ui.label(format!("dx: {}", self.dims_data.dx));
+                        ui.label(format!("dt: {}", self.dims_data.dt));
                         
                         ui.separator();
                         ui.label("Megjelenítendő invariáns:");
