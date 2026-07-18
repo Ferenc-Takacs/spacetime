@@ -144,7 +144,7 @@ impl GpuInterface {
         println!("{}",3);
 
         let grid_size = (app.grid.width * app.grid.height * app.grid.depth) as u64;
-        let bytes_per_point = std::mem::size_of::<MetricPoint>() as u64; // 44 darab f32 pontonként
+        let bytes_per_point = 44*4; //std::mem::size_of::<MetricPoint>() as u64; // 44 darab f32 pontonként
         let io_buffer_size = grid_size * bytes_per_point;
 
         let buffer_a = device.create_buffer(&wgpu::BufferDescriptor {
@@ -170,6 +170,9 @@ impl GpuInterface {
             mapped_at_creation: false,
         });
         println!("{}",5);
+
+        queue.write_buffer(&buffer_a, 0, bytemuck::cast_slice(&app.grid.data));
+        queue.write_buffer(&buffer_b, 0, bytemuck::cast_slice(&app.grid.data));
 
         // BIND GROUP 1: buff_A a múlt (be), buff_B a jövő (ki) -> Páros körök
         let bind_group_a_to_b = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -267,6 +270,12 @@ struct SpacetimeApp {
     pub grid: SpacetimeGrid,
     pub dims_data: GridDimensions,
     pub gpu_interface: Option<GpuInterface>,
+
+    pub view_texture: Option<egui::TextureHandle>,
+    pub selected_z_slice: i32,
+    pub selected_scalar: i32, // 0: R, 1: K, 2: C2, 3: Feszültség 
+    pub min_val: f32,
+    pub max_val: f32,
 }
 
 impl SpacetimeApp {
@@ -282,9 +291,57 @@ impl SpacetimeApp {
             grid,
             dims_data,
             gpu_interface: None,
+            view_texture: None,
+            selected_z_slice: 32,
+            selected_scalar: 3, // 0: R, 1: K, 2: C2, 3: Feszültség    
+            min_val: 0.0,
+            max_val: 0.0,
         }
     }
     
+    fn sclice_statistic( &mut self, ctx: &egui::Context, selected_scalar: i32, result_data: &[f32]) {
+        let width = self.grid.width as usize;
+        let height = self.grid.height as usize;
+        let depth = self.grid.depth as usize;
+        let mut current_min = f32::MAX;
+        let mut current_max = f32::MIN;
+        let scalar_offset = (40 + selected_scalar) as usize;
+        for a in 0..(depth*width*height) {
+            let val = result_data[a*44 + scalar_offset];
+            if val.is_finite() {
+                if val < current_min { current_min = val; }
+                if val > current_max { current_max = val; }
+            }
+        }
+        self.min_val = current_min;
+        self.max_val = current_max;
+        
+        let mut color_pixels = vec![egui::Color32::BLACK; width * height];
+        let z_slice = self.selected_z_slice as usize;
+         //Skálázási faktor a normalizáláshoz (0.0 .. 1.0 közé hozzuk az értékeket)
+        let range = current_max - current_min;
+        let scale = if range.abs() > 1e-6 { 1.0/range } else { 1.0 };
+        if scale == 1.0 { current_min -= 0.5; }
+
+        for y in 0..height {
+            for x in 0..width {
+                let idx_1d = (x + (y * width) + (z_slice * width * height)) * 44;
+                let val = result_data[idx_1d + scalar_offset];
+                let intensity = ((val - current_min) * scale).clamp(0.0, 1.0);
+                // Egy klasszikus asztrofizikai "Hot/Fire" vagy tiszta kék-piros hőtérkép színskála:
+                let r = (intensity * 255.0) as u8;
+                let g = ((intensity * intensity) * 255.0) as u8; // nem-lineáris zöld a lágy átmenethez
+                let b = (128.0 * (1.0 - intensity)) as u8;       // halványuló kék a hideg pontoknak
+                color_pixels[x + (y * width)] = egui::Color32::from_rgb(r, g, b);
+            }
+        }
+        let color_image = egui::ColorImage::new([width, height], color_pixels);
+        self.view_texture = Some(ctx.load_texture(
+            "Spacetime Heatmap Slice",
+            color_image,
+            egui::TextureOptions::NEAREST, // Tiszta, pixeles rácsmegjelenítés elmosás nélkül
+        ));
+    }
 }
 
 impl eframe::App for SpacetimeApp {
@@ -294,11 +351,19 @@ impl eframe::App for SpacetimeApp {
 
             ui.heading("Módosított Téregyenlet Szimulátor");
             ui.separator();
- 
+            
+            let buffer_size_f32 = self.grid.width * self.grid.height * self.grid.depth * 44;
+            
+            let mut local_data_copy = vec![0.0f32; buffer_size_f32 as usize];
+            let mut scalar = -2;
+
             if self.gpu_interface.is_none() {
                 if let Some(render_state) = frame.wgpu_render_state() {
                     println!("Most már van GPU állapota, indulhat a gpu_init...");
                     if let Some(interface) = GpuInterface::init(render_state, &self) {
+                        local_data_copy = bytemuck::cast_slice(&self.grid.data).to_vec();
+                        scalar = 3;
+                        //self.sclice_statistic(ctx,-1, local_data_copy);
                         self.gpu_interface = Some(interface);
                         println!("GPU INTERFÉSZ KÉSZ!");
                     }
@@ -308,8 +373,11 @@ impl eframe::App for SpacetimeApp {
                 ctx.request_repaint();
                 return;
             }
- 
-            ui.label(format!("Rács mérete: {}x{}x{}", self.grid.width, self.grid.height, self.grid.depth));
+            ui.horizontal(|ui| {
+                ui.label(format!("Rács mérete: {}x{}x{}", self.grid.width, self.grid.height, self.grid.depth));
+                ui.separator();
+                ui.label(format!("Aktuális időlépés (t): {}", self.dims_data.step_index));
+            });
 
             // 3. A GOMBNYOMÁSRA KÖZVETLENÜL INDÍTJUK A SZÁMÍTÁST (Nincs async deadlock)
             if ui.button("Görbületi Feszültség Számítása").clicked() {
@@ -328,29 +396,31 @@ impl eframe::App for SpacetimeApp {
                         label: Some("Spacetime Command Encoder"),
                     });
 
-                    let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("Spacetime Compute Pass"),
-                        timestamp_writes: None,
-                    });
-                    
                     // @compute @workgroup_size(4, 4, 4)
                     let workgroups_x = (self.grid.width + 3) / 4;
                     let workgroups_y = (self.grid.height + 3) / 4;
                     let workgroups_z = (self.grid.depth + 3) / 4;
                     
-                    compute_pass.set_bind_group(0, active_bind_group, &[]);
+                    {
+                        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                            label: Some("Spacetime Compute Pass"),
+                            timestamp_writes: None,
+                        });
+                        
+                        compute_pass.set_bind_group(0, active_bind_group, &[]);
 
-                    compute_pass.set_pipeline(&interface.compute_pipeline_1);
-                    compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+                        compute_pass.set_pipeline(&interface.compute_pipeline_1);
+                        compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
 
-                    compute_pass.set_pipeline(&interface.compute_pipeline_2);
-                    compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+                        compute_pass.set_pipeline(&interface.compute_pipeline_2);
+                        compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
 
-                    compute_pass.set_pipeline(&interface.compute_pipeline_3);
-                    compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+                        compute_pass.set_pipeline(&interface.compute_pipeline_3);
+                        compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
 
-                    compute_pass.set_pipeline(&interface.compute_pipeline_4);                        
-                    compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+                        compute_pass.set_pipeline(&interface.compute_pipeline_4);                        
+                        compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+                    }
                     
                     let future_buffer = if self.dims_data.step_index % 2 == 0 {
                         &interface.buffer_b // Ha a step_index páros volt, a B pufferbe írt a shader
@@ -358,13 +428,7 @@ impl eframe::App for SpacetimeApp {
                         &interface.buffer_a // Ha páratlan, az A pufferbe írt
                     };
 
-                    encoder.copy_buffer_to_buffer(
-                        future_buffer,
-                        0,
-                        &interface.staging_buffer,
-                        0,
-                        interface.io_buffer_size, // A teljes rács mérete bájtokban (64x64x64 * 44 * 4)
-                    );
+                    encoder.copy_buffer_to_buffer( future_buffer, 0, &interface.staging_buffer, 0, interface.io_buffer_size );
 
                     interface.queue.submit(std::iter::once(encoder.finish()));
 
@@ -383,50 +447,76 @@ impl eframe::App for SpacetimeApp {
                         }
                     });
 
-                    // A VÉGTELEN CIKLUS ELLENI VÉDELEM: 
-                    // A Maintain::Wait helyett Maintain::Poll-al pörgetjük a GPU-t a háttérben, 
-                    // így az eframe GUI szálai nem tudják blokkolni a Vulkan eseményhurok folyamatait!
                     while !is_mapped.load(Ordering::SeqCst) {
                         let _ = interface.device.poll(wgpu::PollType::Poll);
-                        //device.poll(wgpu::Maintain::Poll);
-                        // Engedünk egy minimális CPU pihenőt, hogy ne pörögjön 100%-on a mag a várakozás alatt
                         std::thread::yield_now(); 
                     }
-
                     println!("Az időlépés sikeresen lefutott a videókártyán!");
+                    {
+                        let data_view = buffer_slice.get_mapped_range();
+                        let result_data: &[f32] = bytemuck::cast_slice(&data_view);
+                        local_data_copy.copy_from_slice(result_data);
+                        scalar = self.selected_scalar;
 
-                    let data_view = buffer_slice.get_mapped_range();
-                    // F32-es szeletként olvassuk be az adatokat
-                    let result_data: &[f32] = bytemuck::cast_slice(&data_view);
+                        // Kiszámítjuk a rács abszolút középpontjának (32, 32, 32) 1D indexét a 44 f32-es hasábban:
+                        let x = 31; // 0..63
+                        let y = 30; // 0..63
+                        let z = 33; // 0..63
+                        let center_1d_index = ((x + (y * self.grid.width) + (z * self.grid.width * self.grid.height)) * 44) as usize;
+                        let r_scalar  = result_data[center_1d_index + 40]; // R
+                        let k_scalar  = result_data[center_1d_index + 41]; // K
+                        let c2_scalar = result_data[center_1d_index + 42]; // C²
+                        let brackets  = result_data[center_1d_index + 43]; // Feszültség
 
-                    // Kiszámítjuk a rács abszolút középpontjának (32, 32, 32) 1D indexét a 44 f32-es hasábban:
-                    let width = 64; let height = 64;
-                    let x = 31;
-                    let y = 30;
-                    let z = 33;
-                    let center_1d_index = (x + (y * width) + (z * width * height)) * 44;
+                        println!("--- Szingularitásmentes Kerr-Toroid Középpont ({},{},{}) ---", x, y, z);
+                        println!("  Ricci görbület (R):     {}", r_scalar);
+                        println!("  Kretschmann skalár (K):  {}", k_scalar);
+                        println!("  Weyl invariáns (C²):     {}", c2_scalar);
+                        println!("  Effektív G Feszültség:  {}", brackets);
 
-                    // KIÉRTÉKELÉS: Kivesszük a 3. fázis végén a 30..33-as indexekre elmentett 4 skalárt
-                    let r_scalar  = result_data[center_1d_index + 30]; // R
-                    let k_scalar  = result_data[center_1d_index + 31]; // K
-                    let c2_scalar = result_data[center_1d_index + 32]; // C²
-                    let brackets  = result_data[center_1d_index + 33]; // Feszültség
-
-                    println!("--- Szingularitásmentes Kerr-Toroid Középpont ({},{},{}) ---", x, y, z);
-                    println!("  Ricci görbület (R):     {}", r_scalar);
-                    println!("  Kretschmann skalár (K):  {}", k_scalar);
-                    println!("  Weyl invariáns (C²):     {}", c2_scalar);
-                    println!("  Effektív G Feszültség:  {}", brackets);
-
-                    drop(data_view);
+                        drop(data_view);
+                    }
                     interface.staging_buffer.unmap();
-
-                    // 6. LÉPTETJÜK A SZÁMLÁLÓKAT A KÖVETKEZŐ KÖRHÖZ
                     self.dims_data.step_index += 1;
                     self.dims_data.init_flag = 0; // Az első időlépés után az inicializáció örökre kikapcsol
 
                 }
             }
+            if scalar != -2 {
+                self.sclice_statistic(ctx, scalar, &local_data_copy);
+            }
+            ui.separator();
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        if let Some(texture) = self.view_texture.as_ref() {
+                            ui.label("Élő 2D Görbületi Metszet (X-Y sík):");
+                            ui.image((texture.id(), egui::vec2(480.0, 480.0)));
+                        } else {
+                            ui.colored_label(
+                                egui::Color32::LIGHT_GRAY,
+                                "Nincs kiszámított adat.\nKattints az 'Időlépés Futtatása' gombra a hőtérkép legenerálásához!",
+                            );
+                        }
+                    });
+                    ui.vertical(|ui| {
+                        ui.heading("Szimulációs Statisztikák");
+                        ui.label(format!("Aktuális időlépés (t): {}", self.dims_data.step_index));
+                        ui.label(format!("Keresett skalár minimuma: {}", self.min_val));
+                        ui.label(format!("Keresett skalár maximuma: {}", self.max_val));
+                        
+                        ui.separator();
+                        ui.label("Megjelenítendő invariáns:");
+                        ui.radio_value(&mut self.selected_scalar, 0, "Ricci Skalár (R)");
+                        ui.radio_value(&mut self.selected_scalar, 1, "Kretschmann (K)");
+                        ui.radio_value(&mut self.selected_scalar, 2, "Weyl-négyzet (C²)");
+                        ui.radio_value(&mut self.selected_scalar, 3, "Gravitációs Feszültség");
+
+                        ui.add(egui::Slider::new(&mut self.selected_z_slice, 0..=63).text("Z-tengely szelet"));
+                    });
+                });
+            });
+            
         });
     }
 }
@@ -460,27 +550,44 @@ impl SpacetimeGrid {
         grid.one_static_schwarzschild(1.0,0.4); // Tesztadatok feltöltése
         grid
     }
-    pub fn one_static_schwarzschild(&mut self, m: f32, r0: f32){
-        // m: A fekete lyuk tömege, r0: Regulázási/tágulási paraméter (a módosított egyenletedből)
+    pub fn one_static_schwarzschild(&mut self, m: f32, r0: f32) {
+        let cx = self.width as f32 / 2.0;
+        let cy = self.height as f32 / 2.0;
+        let cz = self.depth as f32 / 2.0;
+
         for z in 0..self.depth {
             for y in 0..self.height {
                 for x in 0..self.width {
                     let idx = (x + y * self.width + z * self.width * self.height) as usize;
-                    // Átváltunk a rácsindexekből fizikai koordinátákba (középponthoz képest)
-                    let rx = (x as f32 - self.width as f32 / 2.0) * self.dx;
-                    let ry = (y as f32 - self.height as f32 / 2.0) * self.dx;
-                    let rz = (z as f32 - self.depth as f32 / 2.0) * self.dx;
+
+                    // Tűpontos fizikai koordináták a rács abszolút közepéhez képest
+                    let rx = (x as f32 - cx) * self.dx;
+                    let ry = (y as f32 - cy) * self.dx;
+                    let rz = (z as f32 - cz) * self.dx;
+                    
                     let r2 = rx*rx + ry*ry + rz*rz;
                     let r = r2.sqrt();
-                    // SZINGULARITÁSMENTES SCHWARZSCHILD-FAKTOR (Példa a tágulásra)
+
+                    // 1. SZABÁLYOSÍTOTT SCHWARZSCHILD IDŐ-FAKTOR (A te tágulási képleted)
                     let f = 1.0 - (2.0 * m * r2) / (r2 * r + r0 * r0 * r0);
-                    self.data[idx].g[0] = -f;       // Idő komponens
-                    self.data[idx].g[1] = 1.0 / f;
-                    self.data[idx].g[2] = 1.0 / f;
-                    self.data[idx].g[3] = 1.0 / f;
+                    
+                    // 2. IZOTRÓP TÉRBELI FAKTOR (Nincs nullával való osztás!)
+                    // Sima, folytonos átmenetet biztosít a végtelen távolság (1.0) és a mag között
+                    let regularized_r = (r2 + r0*r0).sqrt();
+                    let psi_factor = 1.0 + (2.0 * m) / regularized_r;
+
+                    // 3. TENZOR ELEMEK BEÍRÁSA (idx = 0..9)
+                    self.data[idx].g[0] = -f;          // g00 (Idő)
+                    self.data[idx].g[1] = psi_factor;  // g11 (X térbeli)
+                    self.data[idx].g[2] = psi_factor;  // g22 (Y térbeli)
+                    self.data[idx].g[3] = psi_factor;  // g33 (Z térbeli)
+
+                    // Kirajzoláshoz tesztként elmentjük a G feszültség helyére (s[3]) az f faktort
+                    self.data[idx].s[3] = f; 
                 }
             }
         }
+        println!("Az Izotróp nemszinguláris Schwarzschild mező sikeresen generálva!");
     }
 }
 
