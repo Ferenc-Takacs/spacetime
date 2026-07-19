@@ -8,6 +8,7 @@ struct GridDimensions {
     init_flag: u32,  // (1u = kezdeti inicializáció, 0u = futó szimuláció)
     pad2: u32,
 }
+
 struct GridPoints {
     a : array<f32, 44>,
 }
@@ -17,23 +18,28 @@ struct GridPoints {
 @group(0) @binding(2) var<storage, read_write> buff_new : array<GridPoints>; // dims.width * dims.height * dims.depth * (11 * sizeof(f32))
 
 alias MetricPoint = array<f32, 10>;
-//  struct MetricPoint {
-//      g00, g11, g22, g33,
-//      g01, g02, g03,
-//      g12, g13, g23,
-//  }
+    //  struct MetricPoint {
+    //      g00, g11, g22, g33,
+    //      g01, g02, g03,
+    //      g12, g13, g23,
+    //  }
 
 
 alias Christoffel40 = array<f32, 40>;
-//  struct Christoffel40 {
-//      L0_diag: vec4<f32>, L0_cross: vec4<f32>, L0_rest: vec2<f32>,
-//      L1_diag: vec4<f32>, L1_cross: vec4<f32>, L1_rest: vec2<f32>,
-//      L2_diag: vec4<f32>, L2_cross: vec4<f32>, L2_rest: vec2<f32>,
-//      L3_diag: vec4<f32>, L3_cross: vec4<f32>, L3_rest: vec2<f32>,
-//  }
+    //  struct Christoffel40 {
+    //      L0_diag: vec4<f32>, L0_cross: vec4<f32>, L0_rest: vec2<f32>,
+    //      L1_diag: vec4<f32>, L1_cross: vec4<f32>, L1_rest: vec2<f32>,
+    //      L2_diag: vec4<f32>, L2_cross: vec4<f32>, L2_rest: vec2<f32>,
+    //      L3_diag: vec4<f32>, L3_cross: vec4<f32>, L3_rest: vec2<f32>,
+    //  }
 
 const OLD: i32 = 0;
 const NEW: i32 = 1;
+
+const RICCI: i32 = 0;
+const MOMENTS: i32 = 10;
+const INVERSE: i32 = 20;
+const METRIC: i32 = 30;
 
 fn check_idx(id: vec3<u32>) -> i32 {
     if (id.x >= dims.width || id.y >= dims.height || id.z >= dims.depth) { return -1; }
@@ -54,65 +60,63 @@ fn next(address: i32, dx: i32, dy: i32, dz: i32 ) -> i32 {
     return x + (y + z * h) * w;
 }
 
-fn get_metric(old: i32, address: i32, num: i32) -> MetricPoint {
+fn get_metric(old: i32, address: i32, offs: i32) -> MetricPoint {
     var m: MetricPoint;
-    let i = num*10;
     if( old == OLD ) {
-        m[0] = buff_old[address].a[i];
-        m[1] = buff_old[address].a[i+1];
-        m[2] = buff_old[address].a[i+2];
-        m[3] = buff_old[address].a[i+3];
-        m[4] = buff_old[address].a[i+4];
-        m[5] = buff_old[address].a[i+5];
-        m[6] = buff_old[address].a[i+6];
-        m[7] = buff_old[address].a[i+7];
-        m[8] = buff_old[address].a[i+8];
-        m[9] = buff_old[address].a[i+9];
+        m[0] = buff_old[address].a[offs];
+        m[1] = buff_old[address].a[offs+1];
+        m[2] = buff_old[address].a[offs+2];
+        m[3] = buff_old[address].a[offs+3];
+        m[4] = buff_old[address].a[offs+4];
+        m[5] = buff_old[address].a[offs+5];
+        m[6] = buff_old[address].a[offs+6];
+        m[7] = buff_old[address].a[offs+7];
+        m[8] = buff_old[address].a[offs+8];
+        m[9] = buff_old[address].a[offs+9];
     }
     else {
-        m[0] = buff_new[address].a[i];
-        m[1] = buff_new[address].a[i+1];
-        m[2] = buff_new[address].a[i+2];
-        m[3] = buff_new[address].a[i+3];
-        m[4] = buff_new[address].a[i+4];
-        m[5] = buff_new[address].a[i+5];
-        m[6] = buff_new[address].a[i+6];
-        m[7] = buff_new[address].a[i+7];
-        m[8] = buff_new[address].a[i+8];
-        m[9] = buff_new[address].a[i+9];
+        m[0] = buff_new[address].a[offs];
+        m[1] = buff_new[address].a[offs+1];
+        m[2] = buff_new[address].a[offs+2];
+        m[3] = buff_new[address].a[offs+3];
+        m[4] = buff_new[address].a[offs+4];
+        m[5] = buff_new[address].a[offs+5];
+        m[6] = buff_new[address].a[offs+6];
+        m[7] = buff_new[address].a[offs+7];
+        m[8] = buff_new[address].a[offs+8];
+        m[9] = buff_new[address].a[offs+9];
     }
     return m;
 }
 
-fn set_metric(old: i32, address: i32, num: i32, m: MetricPoint){
-    let i = num*10;
+fn set_metric(old: i32, address: i32, offs: i32, m: MetricPoint){
     if( old == OLD ) {
-        buff_old[address].a[i]   = m[0];
-        buff_old[address].a[i+1] = m[1];
-        buff_old[address].a[i+2] = m[2];
-        buff_old[address].a[i+3] = m[3];
-        buff_old[address].a[i+4] = m[4];
-        buff_old[address].a[i+5] = m[5];
-        buff_old[address].a[i+6] = m[6];
-        buff_old[address].a[i+7] = m[7];
-        buff_old[address].a[i+8] = m[8];
-        buff_old[address].a[i+9] = m[9];
+        buff_old[address].a[offs]   = m[0];
+        buff_old[address].a[offs+1] = m[1];
+        buff_old[address].a[offs+2] = m[2];
+        buff_old[address].a[offs+3] = m[3];
+        buff_old[address].a[offs+4] = m[4];
+        buff_old[address].a[offs+5] = m[5];
+        buff_old[address].a[offs+6] = m[6];
+        buff_old[address].a[offs+7] = m[7];
+        buff_old[address].a[offs+8] = m[8];
+        buff_old[address].a[offs+9] = m[9];
     }
     else {
-        buff_new[address].a[i]   = m[0];
-        buff_new[address].a[i+1] = m[1];
-        buff_new[address].a[i+2] = m[2];
-        buff_new[address].a[i+3] = m[3];
-        buff_new[address].a[i+4] = m[4];
-        buff_new[address].a[i+5] = m[5];
-        buff_new[address].a[i+6] = m[6];
-        buff_new[address].a[i+7] = m[7];
-        buff_new[address].a[i+8] = m[8];
-        buff_new[address].a[i+9] = m[9];
+        buff_new[address].a[offs]   = m[0];
+        buff_new[address].a[offs+1] = m[1];
+        buff_new[address].a[offs+2] = m[2];
+        buff_new[address].a[offs+3] = m[3];
+        buff_new[address].a[offs+4] = m[4];
+        buff_new[address].a[offs+5] = m[5];
+        buff_new[address].a[offs+6] = m[6];
+        buff_new[address].a[offs+7] = m[7];
+        buff_new[address].a[offs+8] = m[8];
+        buff_new[address].a[offs+9] = m[9];
     }
 }
 
-fn get_vec(old: i32, address: i32) -> vec4<f32> {
+fn get_scalars(old: i32, address: i32) -> vec4<f32> {
     var v: vec4<f32>;
     if( old == OLD ) {
         v.x = buff_old[address].a[40];
@@ -129,7 +133,7 @@ fn get_vec(old: i32, address: i32) -> vec4<f32> {
     return v;
 }
 
-fn set_vec(old: i32, address: i32, v: vec4<f32>) {
+fn set_scalars(old: i32, address: i32, v: vec4<f32>) {
     if( old == OLD ) {
         buff_old[address].a[40] = v.x;
         buff_old[address].a[41] = v.y;
@@ -278,9 +282,9 @@ fn invert_metric(p: MetricPoint) -> MetricPoint {
 fn phase1(@builtin(global_invocation_id) coords: vec3<u32>) {
     let address = check_idx(coords);
     if ( address<0 ) { return; }
-    let g = get_metric(OLD, address, 0);
+    let g = get_metric(OLD, address, METRIC);
     let inv = invert_metric(g);
-    set_metric(OLD, address, 1, inv);
+    set_metric(OLD, address, INVERSE, inv);
 }
 // ==========================================
 
@@ -316,14 +320,14 @@ fn get_deriv(mu: u32, a: u32, b: u32,
 
 
 fn get_christoffel_at(address: i32) -> Christoffel40 {
-    let p_center  = get_metric(OLD,address, 0);
-    let g_inverz  = get_metric(OLD,address, 1);
-    let p_x_plus  = get_metric(OLD,next(address, 1, 0, 0), 0);
-    let p_x_minus = get_metric(OLD,next(address,-1, 0, 0), 0);
-    let p_y_plus  = get_metric(OLD,next(address, 0, 1, 0), 0);
-    let p_y_minus = get_metric(OLD,next(address, 0,-1, 0), 0);
-    let p_z_plus  = get_metric(OLD,next(address, 0, 0, 1), 0);
-    let p_z_minus = get_metric(OLD,next(address, 0, 0,-1), 0);
+    let p_center  = get_metric(OLD,address, METRIC);
+    let g_inverz  = get_metric(OLD,address, INVERSE);
+    let p_x_plus  = get_metric(OLD,next(address, 1, 0, 0), METRIC);
+    let p_x_minus = get_metric(OLD,next(address,-1, 0, 0), METRIC);
+    let p_y_plus  = get_metric(OLD,next(address, 0, 1, 0), METRIC);
+    let p_y_minus = get_metric(OLD,next(address, 0,-1, 0), METRIC);
+    let p_z_plus  = get_metric(OLD,next(address, 0, 0, 1), METRIC);
+    let p_z_minus = get_metric(OLD,next(address, 0, 0,-1), METRIC);
 
     var ch: Christoffel40;
     for (var L = 0u; L < 4u; L++) {
@@ -680,8 +684,8 @@ fn phase3(@builtin(global_invocation_id) coords: vec3<u32>) {
     let address = check_idx(coords);
     if ( address<0 ) { return; }
     
-    let g_past = get_metric(OLD,address, 0);
-    let i_past = get_metric(OLD,address, 1);    
+    let g_past = get_metric(OLD,address, METRIC);
+    let i_past = get_metric(OLD,address, INVERSE);    
     let ch_center = load_christoffel_scratchpad(address);
 
     let R20_tensor  = compute_riemann_20(address, ch_center, g_past);
@@ -692,19 +696,19 @@ fn phase3(@builtin(global_invocation_id) coords: vec3<u32>) {
     let brackets = 0.5 * R_scalar + 0.5 * sqrt(K_scalar) + sqrt(C2_scalar);
     
     let scalars = vec4<f32>(R_scalar, K_scalar, C2_scalar, brackets);
-    set_vec(NEW,address, scalars);
-    var rc_metric: MetricPoint;
-    rc_metric[0] = Rc_tensor.R00;
-    rc_metric[1] = Rc_tensor.R11;
-    rc_metric[2] = Rc_tensor.R22;
-    rc_metric[3] = Rc_tensor.R33;
-    rc_metric[4] = Rc_tensor.R01;
-    rc_metric[5] = Rc_tensor.R02;
-    rc_metric[6] = Rc_tensor.R03;
-    rc_metric[7] = Rc_tensor.R12;
-    rc_metric[8] = Rc_tensor.R13;
-    rc_metric[9] = Rc_tensor.R23;
-    set_metric(OLD, address, 3, rc_metric);
+    set_scalars(NEW,address, scalars);
+    var ricci: MetricPoint;
+    ricci[0] = Rc_tensor.R00;
+    ricci[1] = Rc_tensor.R11;
+    ricci[2] = Rc_tensor.R22;
+    ricci[3] = Rc_tensor.R33;
+    ricci[4] = Rc_tensor.R01;
+    ricci[5] = Rc_tensor.R02;
+    ricci[6] = Rc_tensor.R03;
+    ricci[7] = Rc_tensor.R12;
+    ricci[8] = Rc_tensor.R13;
+    ricci[9] = Rc_tensor.R23;
+    set_metric(OLD, address, RICCI, ricci);
 }
 // ==========================================
 
@@ -717,16 +721,16 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
     let address = check_idx(coords);
     if ( address<0 ) { return; }
 
-    let g_past = get_metric(OLD, address, 0);
+    let g_past = get_metric(OLD, address, METRIC);
     var k_past: MetricPoint;
     if (dims.init_flag == 1u) {
         // A legelső körben (t=0) a momentumokat a térbeli elcsavarodás deriváltjaiból generáljuk le!
-        let p_x_plus  = get_metric(OLD,next(address, 1, 0, 0), 0);
-        let p_x_minus = get_metric(OLD,next(address,-1, 0, 0), 0);
-        let p_y_plus  = get_metric(OLD,next(address, 0, 1, 0), 0);
-        let p_y_minus = get_metric(OLD,next(address, 0,-1, 0), 0);
-        let p_z_plus  = get_metric(OLD,next(address, 0, 0, 1), 0);
-        let p_z_minus = get_metric(OLD,next(address, 0, 0,-1), 0);
+        let p_x_plus  = get_metric(OLD,next(address, 1, 0, 0), METRIC);
+        let p_x_minus = get_metric(OLD,next(address,-1, 0, 0), METRIC);
+        let p_y_plus  = get_metric(OLD,next(address, 0, 1, 0), METRIC);
+        let p_y_minus = get_metric(OLD,next(address, 0,-1, 0), METRIC);
+        let p_z_plus  = get_metric(OLD,next(address, 0, 0, 1), METRIC);
+        let p_z_minus = get_metric(OLD,next(address, 0, 0,-1), METRIC);
 
         // Diagonális momentumok kezdetben zérók statikus/forgó egyensúlynál
         k_past[0] = 0.0; k_past[1] = 0.0; k_past[2] = 0.0; k_past[3] = 0.0;
@@ -751,21 +755,21 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
         k_past[9] = d3_g03;                      // k23 = d_3 g_03
     } else {
         // Ha a szimuláció már fut (init_flag == 0u), a momentumokat normálisan a múltból olvassuk be!
-        k_past = get_metric(OLD,address, 2);
+        k_past = get_metric(OLD,address, MOMENTS);
     }
-    let rc_metric = get_metric(OLD,address, 3);
+    let ricci = get_metric(OLD,address, RICCI);
     var Rc_tensor: Ricci10;
-    Rc_tensor.R00 = rc_metric[0];
-    Rc_tensor.R11 = rc_metric[1];
-    Rc_tensor.R22 = rc_metric[2];
-    Rc_tensor.R33 = rc_metric[3];
-    Rc_tensor.R01 = rc_metric[4];
-    Rc_tensor.R02 = rc_metric[5];
-    Rc_tensor.R03 = rc_metric[6];
-    Rc_tensor.R12 = rc_metric[7];
-    Rc_tensor.R13 = rc_metric[8];
-    Rc_tensor.R23 = rc_metric[9];
-    let scalars = get_vec(NEW,address);
+    Rc_tensor.R00 = ricci[0];
+    Rc_tensor.R11 = ricci[1];
+    Rc_tensor.R22 = ricci[2];
+    Rc_tensor.R33 = ricci[3];
+    Rc_tensor.R01 = ricci[4];
+    Rc_tensor.R02 = ricci[5];
+    Rc_tensor.R03 = ricci[6];
+    Rc_tensor.R12 = ricci[7];
+    Rc_tensor.R13 = ricci[8];
+    Rc_tensor.R23 = ricci[9];
+    let scalars = get_scalars(NEW,address);
     let brackets = scalars.w;
 
     // Kiszámítjuk mind a 10 új momentum-komponenst az Euler-szabály szerint
@@ -782,10 +786,24 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
     next_k[9] = k_past[9] + dims.dt * (brackets * g_past[9] - Rc_tensor[9]);
 
     // Most már biztonságosan felülírhatjuk a jövőbeli textúra momentum helyét (idx=2, is_future=1)
-    set_metric(NEW,address,2,next_k);
+    set_metric(NEW,address,MOMENTS,next_k);
 }
 // ==========================================
 
+// ==========================================================
+// 5. FÁZIS: JÖVŐBELI ÁLLAPOT VISSZAMÁSOLÁSA A MÚLTBA (In-place Reset)
+// ==========================================================
+@compute @workgroup_size(4, 4, 4)
+fn phase5(@builtin(global_invocation_id) id: vec3<u32>) {
+    // Határellenőrzés a te check_idx függvényeddel
+    let address = check_idx(id);
+    if (address < 0) { return; }
 
+    // Kézzel kibontott, ultra-gyors unrolled ciklus a 44 elem átmásolására
+    // Így a GPU textúra/puffer betöltő egységei maximális sávszélességgel dolgoznak
+    for (var s = 0; s < 44; s = s + 1) {
+        buff_old[address].a[s] = buff_new[address].a[s];
+    }
+}
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////
 

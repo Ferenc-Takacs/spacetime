@@ -55,8 +55,8 @@ struct GpuInterface {
     pub compute_pipeline_2: wgpu::ComputePipeline,
     pub compute_pipeline_3: wgpu::ComputePipeline,
     pub compute_pipeline_4: wgpu::ComputePipeline,
-    pub bind_group_a_to_b: wgpu::BindGroup,
-    pub bind_group_b_to_a: wgpu::BindGroup,
+    pub compute_pipeline_5: wgpu::ComputePipeline,
+    pub bind_group: wgpu::BindGroup,
     pub dims_buffer: wgpu::Buffer,
     pub buffer_a: wgpu::Buffer,
     pub buffer_b: wgpu::Buffer,
@@ -172,11 +172,9 @@ impl GpuInterface {
         println!("{}",5);
 
         queue.write_buffer(&buffer_a, 0, bytemuck::cast_slice(&app.grid.data));
-        queue.write_buffer(&buffer_b, 0, bytemuck::cast_slice(&app.grid.data));
 
-        // BIND GROUP 1: buff_A a múlt (be), buff_B a jövő (ki) -> Páros körök
-        let bind_group_a_to_b = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Bind Group: A to B"),
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Bind Group"),
             layout: &bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: dims_buffer.as_entire_binding() },
@@ -185,16 +183,6 @@ impl GpuInterface {
             ],
         });
 
-        // BIND GROUP 2: Szerepek felcserélve! buff_B a múlt, buff_A a jövő -> Páratlan körök
-        let bind_group_b_to_a = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Bind Group: B to A"),
-            layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: dims_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: buffer_b.as_entire_binding() }, // Múlt (read_write)
-                wgpu::BindGroupEntry { binding: 2, resource: buffer_a.as_entire_binding() }, // Jövő (read_write)
-            ],
-        });
         println!("{}", 6);
         
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -245,6 +233,15 @@ impl GpuInterface {
             cache: None,
         });
 
+        let compute_pipeline_5 = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Spacetime Compute Pipeline 1"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: Some("phase5"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+
         println!("A teljes Riemann-csővezeték sikeresen felépült a konstruktorban!");
 
         Some(Self{
@@ -253,8 +250,8 @@ impl GpuInterface {
             compute_pipeline_2: compute_pipeline_2,
             compute_pipeline_3: compute_pipeline_3,
             compute_pipeline_4: compute_pipeline_4,
-            bind_group_a_to_b: bind_group_a_to_b,
-            bind_group_b_to_a: bind_group_b_to_a,
+            compute_pipeline_5: compute_pipeline_5,
+            bind_group: bind_group,
             dims_buffer: dims_buffer,
             buffer_a: buffer_a,
             buffer_b: buffer_b,
@@ -412,8 +409,6 @@ impl eframe::App for SpacetimeApp {
                 
                 if let Some(interface) = &self.gpu_interface {
 
-                    interface.queue.write_buffer(&interface.dims_buffer, 0, bytemuck::bytes_of(&self.dims_data));
-
                     let mut encoder = interface.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("Spacetime Command Encoder"),
                     });
@@ -423,19 +418,15 @@ impl eframe::App for SpacetimeApp {
                     let workgroups_y = (self.grid.height + 3) / 4;
                     let workgroups_z = (self.grid.depth + 3) / 4;
                     
-                    let active_bind_group = if self.dims_data.step_index % 2 == 0 {
-                        &interface.bind_group_a_to_b
-                    } else {
-                        &interface.bind_group_b_to_a
-                    };
-                  
                     {
                         let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                             label: Some("Spacetime Compute Pass"),
                             timestamp_writes: None,
                         });
                         
-                        compute_pass.set_bind_group(0, active_bind_group, &[]);
+                        interface.queue.write_buffer(&interface.dims_buffer, 0, bytemuck::bytes_of(&self.dims_data));
+                        
+                        compute_pass.set_bind_group(0, &interface.bind_group, &[]);
 
                         compute_pass.set_pipeline(&interface.compute_pipeline_1);
                         compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
@@ -448,20 +439,18 @@ impl eframe::App for SpacetimeApp {
 
                         compute_pass.set_pipeline(&interface.compute_pipeline_4);                        
                         compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+
+                        compute_pass.set_pipeline(&interface.compute_pipeline_5);                        
+                        compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
                     }
 
-                    let future_buffer = if self.dims_data.step_index % 2 == 0 {
-                        &interface.buffer_b // Ha a step_index páros volt, a B pufferbe írt a shader
-                    } else {
-                        &interface.buffer_a // Ha páratlan, az A pufferbe írt
-                    };
+                    encoder.copy_buffer_to_buffer( &interface.buffer_a, 0, &interface.staging_buffer, 0, interface.io_buffer_size );
 
-                    encoder.copy_buffer_to_buffer( future_buffer, 0, &interface.staging_buffer, 0, interface.io_buffer_size );
-
-                    interface.queue.submit(std::iter::once(encoder.finish()));
+                    interface.queue.submit(Some(encoder.finish()));
+                    //interface.queue.submit(std::iter::once(encoder.finish()));
                     
 // version A
-                    /*
+                    
                     let buffer_slice = interface.staging_buffer.slice(..);
                     let (sender, receiver) = std::sync::mpsc::channel();
                     buffer_slice.map_async(wgpu::MapMode::Read, move |v| sender.send(v).unwrap());
@@ -473,9 +462,10 @@ impl eframe::App for SpacetimeApp {
                         let result_data: &[f32] = bytemuck::cast_slice(&data_view);
                         local_data_copy.copy_from_slice(result_data);
                         drop(data_view);
-                    }*/
+                        interface.staging_buffer.unmap();
+                    }
 // version C
-                    let device_clone = interface.device.clone();
+                    /*let device_clone = interface.device.clone();
                     let staging_buffer_clone = interface.staging_buffer.clone();                    
                     let total_f32_elements = (self.grid.width * self.grid.height * self.grid.depth) as usize * 44;
                     let (sender, receiver) = std::sync::mpsc::channel();
@@ -506,7 +496,7 @@ impl eframe::App for SpacetimeApp {
                         let ctx_clone = ui.ctx().clone();
                         self.sclice_statistic(&ctx_clone);
                         //redraw = true;
-                    }
+                    }*/
 // version B
                     // Létrehozunk egy szálbiztos Atomic bool-t az aszinkron állapot követésére
                     /*
@@ -537,7 +527,7 @@ impl eframe::App for SpacetimeApp {
                         drop(data_view);
                     }*/
 // end of version B                
-                    /*interface.staging_buffer.unmap();
+                    //interface.staging_buffer.unmap();
 
                     let mut src_f32_idx = 0;
                     for p in &mut self.grid.data {
@@ -547,7 +537,7 @@ impl eframe::App for SpacetimeApp {
                     redraw = true;
 
                     self.dims_data.step_index += 1;
-                    self.dims_data.init_flag = 0; // Az első időlépés után az inicializáció örökre kikapcsol*/
+                    self.dims_data.init_flag = 0; // Az első időlépés után az inicializáció örökre kikapcsol
                 }
 
             }
