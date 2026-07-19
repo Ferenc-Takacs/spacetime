@@ -758,35 +758,22 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
         k_past = get_metric(OLD,address, MOMENTS);
     }
     let ricci = get_metric(OLD,address, RICCI);
-    var Rc_tensor: Ricci10;
-    Rc_tensor.R00 = ricci[0];
-    Rc_tensor.R11 = ricci[1];
-    Rc_tensor.R22 = ricci[2];
-    Rc_tensor.R33 = ricci[3];
-    Rc_tensor.R01 = ricci[4];
-    Rc_tensor.R02 = ricci[5];
-    Rc_tensor.R03 = ricci[6];
-    Rc_tensor.R12 = ricci[7];
-    Rc_tensor.R13 = ricci[8];
-    Rc_tensor.R23 = ricci[9];
     let scalars = get_scalars(NEW,address);
     let brackets = scalars.w;
 
     // Kiszámítjuk mind a 10 új momentum-komponenst az Euler-szabály szerint
     var next_k: MetricPoint;
-    next_k[0] = k_past[0] + dims.dt * (brackets * g_past[0] - Rc_tensor[0]);
-    next_k[1] = k_past[1] + dims.dt * (brackets * g_past[1] - Rc_tensor[1]);
-    next_k[2] = k_past[2] + dims.dt * (brackets * g_past[2] - Rc_tensor[2]);
-    next_k[3] = k_past[3] + dims.dt * (brackets * g_past[3] - Rc_tensor[3]);
-    next_k[4] = k_past[4] + dims.dt * (brackets * g_past[4] - Rc_tensor[4]);
-    next_k[5] = k_past[5] + dims.dt * (brackets * g_past[5] - Rc_tensor[5]);
-    next_k[6] = k_past[6] + dims.dt * (brackets * g_past[6] - Rc_tensor[6]);
-    next_k[7] = k_past[7] + dims.dt * (brackets * g_past[7] - Rc_tensor[7]);
-    next_k[8] = k_past[8] + dims.dt * (brackets * g_past[8] - Rc_tensor[8]);
-    next_k[9] = k_past[9] + dims.dt * (brackets * g_past[9] - Rc_tensor[9]);
-
-    // Most már biztonságosan felülírhatjuk a jövőbeli textúra momentum helyét (idx=2, is_future=1)
+    for (var r = 0u; r < 10u; r = r + 1u) {
+        next_k[r] = k_past[r] + dims.dt * (brackets * g_past[r] - ricci[r]);
+    }
     set_metric(NEW,address,MOMENTS,next_k);
+
+    // 2. ÚJ METRIKA (Kinematikai Euler szabály: g_new = g_old - 2 * dt * k_new)
+    var next_g: MetricPoint;
+    for (var r = 0u; r < 10u; r = r + 1u) {
+        next_g[r] = g_past[r] - 2.0 * dims.dt * next_k[r];
+    }
+    set_metric(NEW,address,METRIC,next_g);
 }
 // ==========================================
 

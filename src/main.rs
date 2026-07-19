@@ -59,10 +59,11 @@ struct GpuInterface {
     pub bind_group: wgpu::BindGroup,
     pub dims_buffer: wgpu::Buffer,
     pub buffer_a: wgpu::Buffer,
+    #[allow(unused)]
     pub buffer_b: wgpu::Buffer,
-    pub staging_buffer: wgpu::Buffer,
-    pub device: Arc<wgpu::Device>,
-    pub queue: Arc<wgpu::Queue>,
+    //pub staging_buffer: wgpu::Buffer,
+    //pub device: Arc<wgpu::Device>,
+    //pub queue: Arc<wgpu::Queue>,
 }
 
 #[repr(C)]
@@ -88,8 +89,10 @@ impl GpuInterface {
             return None;
         }
 
-        let device = render_state.device.clone();
-        let queue = render_state.queue.clone();
+        //let device = render_state.device.clone();
+        //let queue = render_state.queue.clone();
+        let device = &render_state.device;
+        let queue = &render_state.queue;
         println!("limits.max_storage_buffers_per_shader_stage : {:?}",limits.max_storage_buffers_per_shader_stage );
 
         let dims_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -158,18 +161,18 @@ impl GpuInterface {
         let buffer_b = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Spacetime Storage Buffer B"),
             size: io_buffer_size,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+            usage: wgpu::BufferUsages::STORAGE,// | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
         println!("{}",5);
 
-        let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Staging Buffer"),
-            size: io_buffer_size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        println!("{}",5);
+        //let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        //    label: Some("Staging Buffer"),
+        //    size: io_buffer_size,
+        //    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        //    mapped_at_creation: false,
+        //});
+        //println!("{}",5);
 
         queue.write_buffer(&buffer_a, 0, bytemuck::cast_slice(&app.grid.data));
 
@@ -255,9 +258,9 @@ impl GpuInterface {
             dims_buffer: dims_buffer,
             buffer_a: buffer_a,
             buffer_b: buffer_b,
-            staging_buffer: staging_buffer,
-            device: device.into(),
-            queue: queue.into(),
+            //staging_buffer: staging_buffer,
+            //device: device,//.into(),
+            //queue: queue,//.into(),
         })
     }
 }
@@ -278,9 +281,9 @@ struct SpacetimeApp {
 
 impl SpacetimeApp {
     fn new() -> Self {
-        let width  = 70;
-        let height = 70;
-        let depth  = 70;
+        let width  = 50;
+        let height = 50;
+        let depth  = 50;
         let dx: f32 = 0.01;
         let dt: f32 = dx * 0.00001;
         let grid = SpacetimeGrid::new(width, height, depth, dx);
@@ -290,9 +293,9 @@ impl SpacetimeApp {
             dims_data,
             gpu_interface: None,
             view_texture: None,
-            selected_z_slice: 70/2, // depth/2
+            selected_z_slice: width as i32/2, // depth/2
             slice_only_stats: true,
-            selected_scalar: 3, // 0: R, 1: K, 2: C2, 3: Feszültség    
+            selected_scalar: 30, // 0: R, 1: K, 2: C2, 3: Feszültség    
             min_val: 0.0,
             max_val: 0.0,
         }
@@ -304,7 +307,7 @@ impl SpacetimeApp {
         let depth = self.grid.depth as usize;
         let mut current_min = f32::MAX;
         let mut current_max = f32::MIN;
-        let scalar_offset = (40 + self.selected_scalar) as usize;
+        let scalar_offset = self.selected_scalar as usize;
         let z_slice = self.selected_z_slice as usize;
         for z in 0..depth {
             // Ha a Checkbox be van jelölve, a külső ciklus átugorja a többi Z-réteget
@@ -339,17 +342,14 @@ impl SpacetimeApp {
         let all_zero = log_range.abs() < 1e-6;
         
         let mut color_pixels = vec![egui::Color32::BLACK; width * height];
-         //Skálázási faktor a normalizáláshoz (0.0 .. 1.0 közé hozzuk az értékeket)
-        let range = current_max - current_min;
-        let scale = if range.abs() > 1e-6 { 1.0/range } else { 1.0 };
 
         for y in 0..height {
             for x in 0..width {
                 let idx_1d = x + (y * width) + (z_slice * width * height);
                 let val = self.grid.data[idx_1d].data[scalar_offset];
-                let mut r = 0;
-                let mut g = 0;
-                let mut b = 128;
+                let r;
+                let g;
+                let b;
                 if all_zero {
                     let checker = (x / 8 + y / 8) % 2 == 0;
                     let gray = if checker { 45 } else { 25 };
@@ -408,8 +408,11 @@ impl eframe::App for SpacetimeApp {
                 println!("Számítás indítása a GPU-n...");
                 
                 if let Some(interface) = &self.gpu_interface {
+                if let Some(render_state) = frame.wgpu_render_state() {
+                let device = &render_state.device;
+                let queue = &render_state.queue;
 
-                    let mut encoder = interface.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("Spacetime Command Encoder"),
                     });
 
@@ -424,9 +427,10 @@ impl eframe::App for SpacetimeApp {
                             timestamp_writes: None,
                         });
                         
-                        interface.queue.write_buffer(&interface.dims_buffer, 0, bytemuck::bytes_of(&self.dims_data));
-                        
                         compute_pass.set_bind_group(0, &interface.bind_group, &[]);
+
+                        queue.write_buffer(&interface.dims_buffer, 0, bytemuck::bytes_of(&self.dims_data));
+                        
 
                         compute_pass.set_pipeline(&interface.compute_pipeline_1);
                         compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
@@ -443,27 +447,39 @@ impl eframe::App for SpacetimeApp {
                         compute_pass.set_pipeline(&interface.compute_pipeline_5);                        
                         compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
                     }
+                    println!("Számítás befejezése a GPU-n...");
 
-                    encoder.copy_buffer_to_buffer( &interface.buffer_a, 0, &interface.staging_buffer, 0, interface.io_buffer_size );
+                    let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("Staging Buffer"),
+                        size: interface.io_buffer_size,
+                        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    });
+                    encoder.copy_buffer_to_buffer( &interface.buffer_a, 0, &staging_buffer, 0, interface.io_buffer_size );
 
-                    interface.queue.submit(Some(encoder.finish()));
-                    //interface.queue.submit(std::iter::once(encoder.finish()));
+                    //interface.queue.submit(Some(encoder.finish()));
+                    queue.submit(std::iter::once(encoder.finish()));
                     
 // version A
-                    
-                    let buffer_slice = interface.staging_buffer.slice(..);
-                    let (sender, receiver) = std::sync::mpsc::channel();
-                    buffer_slice.map_async(wgpu::MapMode::Read, move |v| sender.send(v).unwrap());
-                    let _ = interface.device.poll(wgpu::PollType::wait_indefinitely());
                     let total_f32_elements = (self.grid.width * self.grid.height * self.grid.depth) as usize * 44;
                     let mut local_data_copy = vec![0.0f32; total_f32_elements];
+                    
+                    let buffer_slice = staging_buffer.slice(..);
+                    let (sender, receiver) = std::sync::mpsc::channel();
+                    buffer_slice.map_async(wgpu::MapMode::Read, move |v| { let _ = sender.send(v);});
+                    let _ = device.poll(wgpu::PollType::wait_indefinitely());
                     if let Ok(Ok(())) = receiver.try_recv() {
-                        let data_view = buffer_slice.get_mapped_range();
-                        let result_data: &[f32] = bytemuck::cast_slice(&data_view);
-                        local_data_copy.copy_from_slice(result_data);
-                        drop(data_view);
-                        interface.staging_buffer.unmap();
+                        {
+                            let data_view = buffer_slice.get_mapped_range();
+                            let result_data: &[f32] = bytemuck::cast_slice(&data_view);
+                            local_data_copy.copy_from_slice(result_data);
+                            drop(data_view);
+                        }
                     }
+                    else {
+                        println!("Hiba: A GPU nem tudta megfelelően feltérképezni a memóriát!");
+                    }
+                    staging_buffer.unmap();
 // version C
                     /*let device_clone = interface.device.clone();
                     let staging_buffer_clone = interface.staging_buffer.clone();                    
@@ -512,7 +528,37 @@ impl eframe::App for SpacetimeApp {
                             is_mapped_clone.store(true, Ordering::SeqCst);
                         }
                     });
-                    while !is_mapped.load(Ordering::SeqCst) {
+                    
+                    let mut safety_timeout = 0;
+                    while !is_mapped.load(Ordering::SeqCst) && safety_timeout < 50000 {
+                        // Ha a verziód a kisbetűs formát kéri, írd át wgpu::PollType::poll()-ra
+                        let _ = interface.device.poll(wgpu::PollType::Poll); 
+                        std::thread::yield_now(); // Minimális processzor pihentetés
+                        safety_timeout += 1;
+                    }
+
+                    let total_f32_elements = (self.grid.width * self.grid.height * self.grid.depth) as usize * 44;
+                    let mut local_data_copy = vec![0.0f32; total_f32_elements];
+
+                    // Ha a flag sikeresen átbillent, az adat GARANTÁLTAN ott van és nyitható!
+                    if is_mapped.load(Ordering::SeqCst) {
+                        {
+                            let data_view = buffer_slice.get_mapped_range();
+                            let result_data: &[f32] = bytemuck::cast_slice(&data_view);
+                            
+                            // Gyors memóriamásolással áttöltjük a lokális f32-es vektorunkba
+                            local_data_copy.copy_from_slice(result_data);
+                        } // <-- A data_view ITT SZIGORÚAN és azonnal MEGSEMMISÜL!
+
+                        // Kötelezően és garantáltan lezárjuk a puffert a következő kör előtt!
+                        println!("eredmény visszaolvasva");
+                    } else {
+                        println!("Hiba: Időtúllépés, a GPU nem tudta időben leképezni a memóriát!");
+                    }
+                    interface.staging_buffer.unmap();*/
+                    
+                    
+                    /*while !is_mapped.load(Ordering::SeqCst) {
                         let _ = interface.device.poll(wgpu::PollType::Poll);
                         std::thread::yield_now(); 
                     }
@@ -538,6 +584,8 @@ impl eframe::App for SpacetimeApp {
 
                     self.dims_data.step_index += 1;
                     self.dims_data.init_flag = 0; // Az első időlépés után az inicializáció örökre kikapcsol
+                    println!("eredmény visszaolvasva");
+                }
                 }
 
             }
@@ -604,10 +652,20 @@ impl eframe::App for SpacetimeApp {
                         
                         ui.separator();
                         ui.label("Megjelenítendő invariáns:");
-                        if ui.radio_value(&mut self.selected_scalar, 0, "Ricci Skalár (R)").changed() { redraw = true; }
-                        if ui.radio_value(&mut self.selected_scalar, 1, "Kretschmann (K)").changed() { redraw = true; }
-                        if ui.radio_value(&mut self.selected_scalar, 2, "Weyl-négyzet (C²)").changed() { redraw = true; }
-                        if ui.radio_value(&mut self.selected_scalar, 3, "Gravitációs Feszültség").changed() { redraw = true; }
+                        if ui.radio_value(&mut self.selected_scalar, 30, "g_00").changed() { redraw = true; }
+                        if ui.radio_value(&mut self.selected_scalar, 31, "g_11").changed() { redraw = true; }
+                        if ui.radio_value(&mut self.selected_scalar, 32, "g_22").changed() { redraw = true; }
+                        if ui.radio_value(&mut self.selected_scalar, 33, "g_33").changed() { redraw = true; }
+                        if ui.radio_value(&mut self.selected_scalar, 34, "g_01").changed() { redraw = true; }
+                        if ui.radio_value(&mut self.selected_scalar, 35, "g_02").changed() { redraw = true; }
+                        if ui.radio_value(&mut self.selected_scalar, 36, "g_03").changed() { redraw = true; }
+                        if ui.radio_value(&mut self.selected_scalar, 37, "g_12").changed() { redraw = true; }
+                        if ui.radio_value(&mut self.selected_scalar, 38, "g_13").changed() { redraw = true; }
+                        if ui.radio_value(&mut self.selected_scalar, 39, "g_23").changed() { redraw = true; }
+                        if ui.radio_value(&mut self.selected_scalar, 40, "Ricci Skalár (R)").changed() { redraw = true; }
+                        if ui.radio_value(&mut self.selected_scalar, 41, "Kretschmann (K)").changed() { redraw = true; }
+                        if ui.radio_value(&mut self.selected_scalar, 42, "Weyl-négyzet (C²)").changed() { redraw = true; }
+                        if ui.radio_value(&mut self.selected_scalar, 43, "Gravitációs Feszültség").changed() { redraw = true; }
 
                         if ui.add(egui::Slider::new(&mut self.selected_z_slice, 0..=(self.grid.depth as i32 - 1)).text("Z-tengely szelet")).changed() { redraw = true; }
                         if ui.checkbox(&mut self.slice_only_stats, "Csak az aktuális szelet min/max").changed() {
@@ -645,7 +703,7 @@ impl SpacetimeGrid {
         let size = (width * height * depth) as usize;
         let data = vec![MetricPoint::zeroed(); size]; // nullára inicializálunk!!!
         let mut grid =  SpacetimeGrid{ width, height, depth, dx, data };
-        grid.one_static_schwarzschild(1.0,0.4); // Tesztadatok feltöltése
+        grid.one_static_schwarzschild( 10.5, 0.6); // Tesztadatok feltöltése
         grid
     }
     pub fn one_static_schwarzschild(&mut self, m: f32, r0: f32) {
@@ -675,10 +733,10 @@ impl SpacetimeGrid {
                     let psi_factor = 1.0 + (2.0 * m) / regularized_r;
 
                     // 3. TENZOR ELEMEK BEÍRÁSA (idx = 0..9)
-                    self.data[idx].data[0] = -f;          // g00 (Idő)
-                    self.data[idx].data[1] = psi_factor;  // g11 (X térbeli)
-                    self.data[idx].data[2] = psi_factor;  // g22 (Y térbeli)
-                    self.data[idx].data[3] = psi_factor;  // g33 (Z térbeli)
+                    self.data[idx].data[30] = -f;          // g00 (Idő)
+                    self.data[idx].data[31] = psi_factor;  // g11 (X térbeli)
+                    self.data[idx].data[32] = psi_factor;  // g22 (Y térbeli)
+                    self.data[idx].data[33] = psi_factor;  // g33 (Z térbeli)
 
                     // Kirajzoláshoz tesztként elmentjük a G feszültség helyére (s[3]) az f faktort
                     self.data[idx].data[43] = f; 
