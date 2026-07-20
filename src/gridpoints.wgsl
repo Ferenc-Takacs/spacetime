@@ -10,7 +10,7 @@ struct GridDimensions {
 }
 
 struct GridPoints {
-    a : array<f32, 44>,
+    a : array<f32, 48>,
 }
 
 @group(0) @binding(0) var<uniform> dims: GridDimensions;
@@ -37,26 +37,9 @@ const OLD: i32 = 0;
 const NEW: i32 = 1;
 
 const RICCI: i32 = 0;
-const MOMENTS: i32 = 10;
-const INVERSE: i32 = 20;
+const MOMENT: i32 = 10;
+const INVERZ: i32 = 20;
 const METRIC: i32 = 30;
-
-const _00: i32 = 0;
-const _11: i32 = 1;
-const _22: i32 = 2;
-const _33: i32 = 3;
-const _01: i32 = 4;
-const _10: i32 = 4;
-const _02: i32 = 5;
-const _20: i32 = 5;
-const _03: i32 = 6;
-const _30: i32 = 6;
-const _12: i32 = 7;
-const _21: i32 = 7;
-const _13: i32 = 8;
-const _31: i32 = 8;
-const _23: i32 = 9;
-const _32: i32 = 9;
 
 fn check_idx(id: vec3<u32>) -> i32 {
     if (id.x >= dims.width || id.y >= dims.height || id.z >= dims.depth) { return -1; }
@@ -133,7 +116,7 @@ fn set_metric(old: i32, address: i32, offs: i32, m: MetricPoint){
     }
 }
 
-fn get_scalars(old: i32, address: i32) -> vec4<f32> {
+fn get_vec1(old: i32, address: i32) -> vec4<f32> {
     var v: vec4<f32>;
     if( old == OLD ) {
         v.x = buff_old[address].a[40];
@@ -150,7 +133,7 @@ fn get_scalars(old: i32, address: i32) -> vec4<f32> {
     return v;
 }
 
-fn set_scalars(old: i32, address: i32, v: vec4<f32>) {
+fn set_vec1(old: i32, address: i32, v: vec4<f32>) {
     if( old == OLD ) {
         buff_old[address].a[40] = v.x;
         buff_old[address].a[41] = v.y;
@@ -162,6 +145,38 @@ fn set_scalars(old: i32, address: i32, v: vec4<f32>) {
         buff_new[address].a[41] = v.y;
         buff_new[address].a[42] = v.z;
         buff_new[address].a[43] = v.w;
+    }
+}
+
+fn get_vec2(old: i32, address: i32) -> vec4<f32> {
+    var v: vec4<f32>;
+    if( old == OLD ) {
+        v.x = buff_old[address].a[44];
+        v.y = buff_old[address].a[45];
+        v.z = buff_old[address].a[46];
+        v.w = buff_old[address].a[47];
+    }
+    else {
+        v.x = buff_new[address].a[44];
+        v.y = buff_new[address].a[45];
+        v.z = buff_new[address].a[46];
+        v.w = buff_new[address].a[47];
+    }
+    return v;
+}
+
+fn set_vec2(old: i32, address: i32, v: vec4<f32>) {
+    if( old == OLD ) {
+        buff_old[address].a[44] = v.x;
+        buff_old[address].a[45] = v.y;
+        buff_old[address].a[46] = v.z;
+        buff_old[address].a[47] = v.w;
+    }
+    else {
+        buff_new[address].a[44] = v.x;
+        buff_new[address].a[45] = v.y;
+        buff_new[address].a[46] = v.z;
+        buff_new[address].a[47] = v.w;
     }
 }
 
@@ -257,7 +272,7 @@ fn load_christoffel_scratchpad(address: i32) -> Christoffel40 {
 
 // 4x4-es inverz metrika kiszámítása (Cramer-szabály)
 fn det3x3(m00: f32, m01: f32, m02: f32, m10: f32, m11: f32, m12: f32, m20: f32, m21: f32, m22: f32) -> f32 {
-    return m00 * (m11 * m22 - m12 * m21) - m01 * (m10 * m22 - m12 * m20) + m02 * (m10 * m21 - m11 * m20);
+    return m00 * (m11 * m22 - m12 * m21) + m01 * (m12 * m20 - m10 * m22) + m02 * (m10 * m21 - m11 * m20);
 }
 
 fn invert_metric(p: MetricPoint) -> MetricPoint {
@@ -265,29 +280,31 @@ fn invert_metric(p: MetricPoint) -> MetricPoint {
     let m10 = p[4]; let m11 = p[1]; let m12 = p[7]; let m13 = p[8];
     let m20 = p[5]; let m21 = p[7]; let m22 = p[2]; let m23 = p[9];
     let m30 = p[6]; let m31 = p[8]; let m32 = p[9]; let m33 = p[3];
+    
+    let det00 =  det3x3(m11, m12, m13, m21, m22, m23, m31, m32, m33);
+    let det01 = -det3x3(m10, m12, m13, m20, m22, m23, m30, m32, m33);
+    let det02 =  det3x3(m10, m11, m13, m20, m21, m23, m30, m31, m33);
+    let det03 = -det3x3(m10, m11, m12, m20, m21, m22, m30, m31, m32);
 
-    let det = m00 * det3x3(m11, m12, m13, m21, m22, m23, m31, m32, m33)
-            - m01 * det3x3(m10, m12, m13, m20, m22, m23, m30, m32, m33)
-            + m02 * det3x3(m10, m11, m13, m20, m21, m23, m30, m31, m33)
-            - m03 * det3x3(m10, m11, m12, m20, m21, m22, m30, m31, m32);
-
+    let det = m00 * det00 + m01 * det01 + m02 * det02 + m03 * det03;
+    
     var inv_det = 0.0;
     if (abs(det) > 1e-9) { inv_det = 1.0 / det; }
 
     var inv: MetricPoint;
-    inv[0] =  det3x3(m11, m12, m13, m21, m22, m23, m31, m32, m33) * inv_det;
-    inv[1] =  det3x3(m00, m02, m03, m20, m22, m23, m30, m32, m33) * inv_det;
-    inv[2] =  det3x3(m00, m01, m03, m10, m11, m13, m30, m31, m33) * inv_det;
-    inv[3] =  det3x3(m00, m01, m02, m10, m11, m12, m20, m21, m22) * inv_det;
+    inv[0] =  det00 * inv_det; // 00
+    inv[1] =  det3x3(m00, m02, m03, m20, m22, m23, m30, m32, m33) * inv_det; // 11
+    inv[2] =  det3x3(m00, m01, m03, m10, m11, m13, m30, m31, m33) * inv_det; // 22
+    inv[3] =  det3x3(m00, m01, m02, m10, m11, m12, m20, m21, m22) * inv_det; // 33
     
-    inv[4] = -det3x3(m10, m12, m13, m20, m22, m23, m30, m32, m33) * inv_det;
-    inv[5] =  det3x3(m10, m11, m13, m20, m21, m23, m30, m31, m33) * inv_det;
-    inv[6] = -det3x3(m10, m11, m12, m20, m21, m22, m30, m31, m32) * inv_det;
+    inv[4] =  det01 * inv_det; // 01
+    inv[5] =  det02 * inv_det; // 02
+    inv[6] =  det03 * inv_det; // 03
     
-    inv[7] = -det3x3(m00, m02, m03, m10, m12, m13, m30, m32, m33) * inv_det;
-    inv[8] =  det3x3(m00, m01, m03, m10, m11, m13, m20, m21, m23) * inv_det;
+    inv[7] = -det3x3(m00, m01, m03, m20, m21, m23, m30, m31, m33) * inv_det; // 12
+    inv[8] =  det3x3(m00, m01, m02, m20, m21, m22, m30, m31, m32) * inv_det; // 13
     
-    inv[9] = -det3x3(m00, m01, m02, m10, m11, m12, m30, m31, m32) * inv_det;
+    inv[9] = -det3x3(m00, m01, m02, m10, m11, m12, m30, m31, m32) * inv_det; // 23
     return inv;
 }
 
@@ -301,7 +318,7 @@ fn phase1(@builtin(global_invocation_id) coords: vec3<u32>) {
     if ( address<0 ) { return; }
     let g = get_metric(OLD, address, METRIC);
     let inv = invert_metric(g);
-    set_metric(OLD, address, INVERSE, inv);
+    set_metric(OLD, address, INVERZ, inv);
 }
 // ==========================================
 
@@ -329,7 +346,7 @@ fn get_deriv(mu: u32, a: u32, b: u32,
     if (mu == 0u) { return 0.0; }
     var val_plus = 0.0;
     var val_minus = 0.0;
-    if (mu == 1u) { val_plus = extract_metric_element(p_x_plus, a, b); val_minus = extract_metric_element(p_x_minus, a, b); }
+    if (mu == 1u)      { val_plus = extract_metric_element(p_x_plus, a, b); val_minus = extract_metric_element(p_x_minus, a, b); }
     else if (mu == 2u) { val_plus = extract_metric_element(p_y_plus, a, b); val_minus = extract_metric_element(p_y_minus, a, b); }
     else if (mu == 3u) { val_plus = extract_metric_element(p_z_plus, a, b); val_minus = extract_metric_element(p_z_minus, a, b); }
     return (val_plus - val_minus) / (2.0 * dims.dx);
@@ -338,7 +355,7 @@ fn get_deriv(mu: u32, a: u32, b: u32,
 
 fn get_christoffel_at(address: i32) -> Christoffel40 {
     let p_center  = get_metric(OLD,address, METRIC);
-    let g_inverz  = get_metric(OLD,address, INVERSE);
+    let g_inverz  = get_metric(OLD,address, INVERZ);
     let p_x_plus  = get_metric(OLD,next(address, 1, 0, 0), METRIC);
     let p_x_minus = get_metric(OLD,next(address,-1, 0, 0), METRIC);
     let p_y_plus  = get_metric(OLD,next(address, 0, 1, 0), METRIC);
@@ -353,7 +370,7 @@ fn get_christoffel_at(address: i32) -> Christoffel40 {
         var temp_rest = vec2<f32>(0.0);
         for (var k = 0u; k < 10u; k++) {
             var M = 0u; var N = 0u;
-            if (k == 0u) { M = 0u; N = 0u; }
+            if      (k == 0u) { M = 0u; N = 0u; }
             else if (k == 1u) { M = 1u; N = 1u; }
             else if (k == 2u) { M = 2u; N = 2u; }
             else if (k == 3u) { M = 3u; N = 3u; }
@@ -362,7 +379,7 @@ fn get_christoffel_at(address: i32) -> Christoffel40 {
             else if (k == 6u) { M = 0u; N = 3u; }
             else if (k == 7u) { M = 1u; N = 2u; }
             else if (k == 8u) { M = 1u; N = 3u; }
-            else { M = 2u; N = 3u; }
+            else              { M = 2u; N = 3u; }
 
             var val = 0.0;
             for (var sig = 0u; sig < 4u; sig++) {
@@ -380,7 +397,7 @@ fn get_christoffel_at(address: i32) -> Christoffel40 {
             else if (k == 5u) { temp_cross.y = val; }
             else if (k == 6u) { temp_cross.z = val; }
             else if (k == 7u) { temp_cross.w = val; }
-            else if (k == 8u) { temp_rest .x = val; }
+            else if (k == 8u) { temp_rest.x = val; }
             else              { temp_rest.y = val; }
         }
 
@@ -430,11 +447,16 @@ fn extract_gamma(ch: Christoffel40, L: u32, M: u32, N: u32) -> f32 {
 
     // Kiszámoljuk az alsó indexpár belső k-indexét (0..9)
     var k = 0u;
-    if (u == 0u && v == 0u)      { k = 0u; } else if (u == 1u && v == 1u) { k = 1u; }
-    else if (u == 2u && v == 2u) { k = 2u; } else if (u == 3u && v == 3u) { k = 3u; }
-    else if (u == 0u && v == 1u) { k = 4u; } else if (u == 0u && v == 2u) { k = 5u; }
-    else if (u == 0u && v == 3u) { k = 6u; } else if (u == 1u && v == 2u) { k = 7u; }
-    else if (u == 1u && v == 3u) { k = 8u; } else                         { k = 9u; }
+    if (u == 0u && v == 0u)      { k = 0u; }
+    else if (u == 1u && v == 1u) { k = 1u; }
+    else if (u == 2u && v == 2u) { k = 2u; }
+    else if (u == 3u && v == 3u) { k = 3u; }
+    else if (u == 0u && v == 1u) { k = 4u; }
+    else if (u == 0u && v == 2u) { k = 5u; }
+    else if (u == 0u && v == 3u) { k = 6u; }
+    else if (u == 1u && v == 2u) { k = 7u; }
+    else if (u == 1u && v == 3u) { k = 8u; }
+    else                         { k = 9u; }
 
     // A felső index (L) eltolja a bázisindexet 10-esével
     let final_index = (L * 10u) + k;
@@ -622,15 +644,49 @@ struct Ricci10 {
 fn compute_ricci(R_tensor: Riemann20, g_inv: MetricPoint) -> Ricci10 {
     var Rc: Ricci10;
     // Lokális segédfüggvény mintájára a 10 kontrakció legenerálása
-    Rc.R00 = g_inv[1] * extract_r4(R_tensor,1u,0u,1u,0u) + g_inv[2] * extract_r4(R_tensor,2u,0u,2u,0u) + g_inv[3] * extract_r4(R_tensor,3u,0u,3u,0u) + 2.0 * (g_inv[4] * extract_r4(R_tensor,0u,0u,1u,0u) + g_inv[5] * extract_r4(R_tensor,0u,0u,2u,0u) + g_inv[6] * extract_r4(R_tensor,0u,0u,3u,0u)+ g_inv[7] * extract_r4(R_tensor,1u,0u,2u,0u) + g_inv[8] * extract_r4(R_tensor,1u,0u,3u,0u) + g_inv[9] * extract_r4(R_tensor,2u,0u,3u,0u));
+    Rc.R00 = g_inv[1] * extract_r4(R_tensor,1u,0u,1u,0u) +
+             g_inv[2] * extract_r4(R_tensor,2u,0u,2u,0u) +
+             g_inv[3] * extract_r4(R_tensor,3u,0u,3u,0u) +
+             2.0 * (g_inv[4] * extract_r4(R_tensor,0u,0u,1u,0u) +
+                    g_inv[5] * extract_r4(R_tensor,0u,0u,2u,0u) +
+                    g_inv[6] * extract_r4(R_tensor,0u,0u,3u,0u) +
+                    g_inv[7] * extract_r4(R_tensor,1u,0u,2u,0u) +
+                    g_inv[8] * extract_r4(R_tensor,1u,0u,3u,0u) +
+                    g_inv[9] * extract_r4(R_tensor,2u,0u,3u,0u));
     
-    Rc.R11 = g_inv[0] * extract_r4(R_tensor,0u,1u,0u,1u) + g_inv[2] * extract_r4(R_tensor,2u,1u,2u,1u) + g_inv[3] * extract_r4(R_tensor,3u,1u,3u,1u) + 2.0 * (g_inv[4] * extract_r4(R_tensor,0u,1u,1u,1u) + g_inv[5] * extract_r4(R_tensor,0u,1u,2u,1u) + g_inv[6] * extract_r4(R_tensor,0u,1u,3u,1u)+ g_inv[7] * extract_r4(R_tensor,1u,1u,2u,1u) + g_inv[8] * extract_r4(R_tensor,1u,1u,3u,1u) + g_inv[9] * extract_r4(R_tensor,2u,1u,3u,1u));
+    Rc.R11 = g_inv[0] * extract_r4(R_tensor,0u,1u,0u,1u) +
+             g_inv[2] * extract_r4(R_tensor,2u,1u,2u,1u) +
+             g_inv[3] * extract_r4(R_tensor,3u,1u,3u,1u) +
+             2.0 * (g_inv[4] * extract_r4(R_tensor,0u,1u,1u,1u) +
+                    g_inv[5] * extract_r4(R_tensor,0u,1u,2u,1u) +
+                    g_inv[6] * extract_r4(R_tensor,0u,1u,3u,1u) +
+                    g_inv[7] * extract_r4(R_tensor,1u,1u,2u,1u) +
+                    g_inv[8] * extract_r4(R_tensor,1u,1u,3u,1u) +
+                    g_inv[9] * extract_r4(R_tensor,2u,1u,3u,1u));
     
-    Rc.R22 = g_inv[0] * extract_r4(R_tensor,0u,2u,0u,2u) + g_inv[1] * extract_r4(R_tensor,1u,2u,1u,2u) + g_inv[3] * extract_r4(R_tensor,3u,2u,3u,2u) + 2.0 * (g_inv[4] * extract_r4(R_tensor,0u,2u,1u,2u) + g_inv[5] * extract_r4(R_tensor,0u,2u,2u,2u) + g_inv[6] * extract_r4(R_tensor,0u,2u,3u,2u)+ g_inv[7] * extract_r4(R_tensor,1u,2u,2u,2u) + g_inv[8] * extract_r4(R_tensor,1u,2u,3u,2u) + g_inv[9] * extract_r4(R_tensor,2u,2u,3u,2u));
+    Rc.R22 = g_inv[0] * extract_r4(R_tensor,0u,2u,0u,2u) +
+             g_inv[1] * extract_r4(R_tensor,1u,2u,1u,2u) +
+             g_inv[3] * extract_r4(R_tensor,3u,2u,3u,2u) +
+             2.0 * (g_inv[4] * extract_r4(R_tensor,0u,2u,1u,2u) +
+                    g_inv[5] * extract_r4(R_tensor,0u,2u,2u,2u) +
+                    g_inv[6] * extract_r4(R_tensor,0u,2u,3u,2u) +
+                    g_inv[7] * extract_r4(R_tensor,1u,2u,2u,2u) +
+                    g_inv[8] * extract_r4(R_tensor,1u,2u,3u,2u) +
+                    g_inv[9] * extract_r4(R_tensor,2u,2u,3u,2u));
     
-    Rc.R33 = g_inv[0] * extract_r4(R_tensor,0u,3u,0u,3u) + g_inv[1] * extract_r4(R_tensor,1u,3u,1u,3u) + g_inv[2] * extract_r4(R_tensor,2u,3u,2u,3u) + 2.0 * (g_inv[4] * extract_r4(R_tensor,0u,3u,1u,3u) + g_inv[5] * extract_r4(R_tensor,0u,3u,2u,3u) + g_inv[6] * extract_r4(R_tensor,0u,3u,3u,3u)+ g_inv[7] * extract_r4(R_tensor,1u,3u,2u,3u) + g_inv[8] * extract_r4(R_tensor,1u,3u,3u,3u) + g_inv[9] * extract_r4(R_tensor,2u,3u,2u,3u));
+    Rc.R33 = g_inv[0] * extract_r4(R_tensor,0u,3u,0u,3u) +
+             g_inv[1] * extract_r4(R_tensor,1u,3u,1u,3u) +
+             g_inv[2] * extract_r4(R_tensor,2u,3u,2u,3u) +
+             2.0 * (g_inv[4] * extract_r4(R_tensor,0u,3u,1u,3u) +
+                    g_inv[5] * extract_r4(R_tensor,0u,3u,2u,3u) +
+                    g_inv[6] * extract_r4(R_tensor,0u,3u,3u,3u) +
+                    g_inv[7] * extract_r4(R_tensor,1u,3u,2u,3u) +
+                    g_inv[8] * extract_r4(R_tensor,1u,3u,3u,3u) +
+                    g_inv[9] * extract_r4(R_tensor,2u,3u,2u,3u));
     
-    Rc.R01 = g_inv[2] * extract_r4(R_tensor,2u,0u,2u,1u) + g_inv[3] * extract_r4(R_tensor,3u,0u,3u,1u) + g_inv[4] * (extract_r4(R_tensor,0u,0u,1u,1u)+extract_r4(R_tensor,1u,0u,0u,1u));
+    Rc.R01 = g_inv[2] * extract_r4(R_tensor,2u,0u,2u,1u) +
+             g_inv[3] * extract_r4(R_tensor,3u,0u,3u,1u) +
+             g_inv[4] * (extract_r4(R_tensor,0u,0u,1u,1u) + extract_r4(R_tensor,1u,0u,0u,1u));
     // Vegyes kereszt kontrakciók simplified
     Rc.R02 = g_inv[1] * extract_r4(R_tensor,1u,0u,1u,2u) + g_inv[3] * extract_r4(R_tensor,3u,0u,3u,2u);
     Rc.R03 = g_inv[1] * extract_r4(R_tensor,1u,0u,1u,3u) + g_inv[2] * extract_r4(R_tensor,2u,0u,2u,3u);
@@ -641,8 +697,16 @@ fn compute_ricci(R_tensor: Riemann20, g_inv: MetricPoint) -> Ricci10 {
 }
 
 fn compute_ricci_scalar(Rc: Ricci10, g_inv: MetricPoint) -> f32 {
-    return g_inv[0] * Rc.R00 + g_inv[1] * Rc.R11 + g_inv[2] * Rc.R22 + g_inv[3] * Rc.R33 +
-        2.0 * (g_inv[4] * Rc.R01 + g_inv[5] * Rc.R02 + g_inv[6] * Rc.R03 + g_inv[7] * Rc.R12 + g_inv[8] * Rc.R13 + g_inv[9] * Rc.R23);
+    return g_inv[0] * Rc.R00 +
+           g_inv[1] * Rc.R11 +
+           g_inv[2] * Rc.R22 +
+           g_inv[3] * Rc.R33 +
+    2.0 * (g_inv[4] * Rc.R01 +
+           g_inv[5] * Rc.R02 +
+           g_inv[6] * Rc.R03 +
+           g_inv[7] * Rc.R12 +
+           g_inv[8] * Rc.R13 +
+           g_inv[9] * Rc.R23);
 }
 
 fn compute_kretschmann(R: Riemann20) -> f32 {
@@ -691,6 +755,45 @@ fn compute_weyl_squared(K: f32, Rc: Ricci10, g_inv: MetricPoint, R_scalar: f32) 
     return max(0.0, C2);
 }
 
+struct ElectricWeyl5 {
+    E11: f32, E22: f32,
+    E12: f32, E13: f32, E23: f32,
+}
+
+struct MagneticWeyl5 {
+    B11: f32, B22: f32,
+    B12: f32, B13: f32, B23: f32,
+}
+
+fn compute_gravito_electromagnetism(R: Riemann20, Rc: Ricci10, g: MetricPoint, i: MetricPoint) -> vec4<f32> {
+    var E: ElectricWeyl5;
+    var B: MagneticWeyl5;
+
+    // 1. ELEKTROMOS WEYL-TENZOR (Newtoni árapály-erők és térbeli feszültség)
+    E.E11 = R.R0101 - 0.5 * (g[1]*Rc.R11 + g[0]*Rc.R00); 
+    E.E22 = R.R0202 - 0.5 * (g[2]*Rc.R22 + g[0]*Rc.R00);
+    
+    E.E12 = R.R0102 - 0.5 * (g[4]*Rc.R12); 
+    E.E13 = R.R0103 - 0.5 * (g[5]*Rc.R13);
+    E.E23 = R.R0203 - 0.5 * (g[7]*Rc.R23);
+
+    // 2. JAVÍTOTT MÁGNESES WEYL-TENZOR (Kizárólag létező Riemann20 mezőkkel!)
+    // Ez a tenzor méri a téridő forgásából eredő gravitomágneses nyírófeszültségeket,
+    // ami nálad a g12-es oktaéderes elcsavarodási kitörést okozza a Z-tengely mentén.
+    B.B11 = -R.R0123; 
+    B.B22 = -R.R0213;
+    
+    B.B12 = -R.R0223;
+    B.B13 =  R.R0323;
+    B.B23 =  R.R0313;
+
+    // 3. SKALÁR INTENZITÁSOK NÉGYZETÉNEK ÖSSZEGE (Nyommentes tenzorkontrakciók)
+    let E_squared = E.E11*E.E11 + E.E22*E.E22 + (E.E11+E.E22)*(E.E11+E.E22) + 2.0*(E.E12*E.E12 + E.E13*E.E13 + E.E23*E.E23);
+    let B_squared = B.B11*B.B11 + B.B22*B.B22 + (B.B11+B.B22)*(B.B11+B.B22) + 2.0*(B.B12*B.B12 + B.B13*B.B13 + B.B23*B.B23);
+
+    // Visszaadjuk a gravito-elektromos és mágneses térerőket a 11. zónára a kirajzoláshoz
+    return vec4<f32>(sqrt(E_squared), sqrt(B_squared), E.E12, B.B12);
+}
 
 
 // ==========================================================
@@ -702,7 +805,7 @@ fn phase3(@builtin(global_invocation_id) coords: vec3<u32>) {
     if ( address<0 ) { return; }
     
     let g_past = get_metric(OLD,address, METRIC);
-    let i_past = get_metric(OLD,address, INVERSE);    
+    let i_past = get_metric(OLD,address, INVERZ);    
     let ch_center = load_christoffel_scratchpad(address);
 
     let R20_tensor  = compute_riemann_20(address, ch_center, g_past);
@@ -713,7 +816,11 @@ fn phase3(@builtin(global_invocation_id) coords: vec3<u32>) {
     let brackets = 0.5 * R_scalar + 0.5 * K_scalar + C2_scalar;
     
     let scalars = vec4<f32>(R_scalar, K_scalar, C2_scalar, brackets);
-    set_scalars(NEW,address, scalars);
+    set_vec1(NEW,address, scalars);
+    
+    let gem_scalars = compute_gravito_electromagnetism(R20_tensor, Rc_tensor, g_past, i_past);
+    set_vec2(NEW, address, gem_scalars);
+
     var ricci: MetricPoint;
     ricci[0] = Rc_tensor.R00;
     ricci[1] = Rc_tensor.R11;
@@ -726,9 +833,9 @@ fn phase3(@builtin(global_invocation_id) coords: vec3<u32>) {
     ricci[8] = Rc_tensor.R13;
     ricci[9] = Rc_tensor.R23;
     set_metric(OLD, address, RICCI, ricci);
+    
 }
 // ==========================================
-
 
 // ==========================================================
 // 4. FÁZIS: IDŐFEJLESZTÉS - ÚJ MOMENTUMOK (Mentés a Jövő momentum helyére)
@@ -772,29 +879,25 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
         k_past[9] = d3_g03;                      // k23 = d_3 g_03
     } else {
         // Ha a szimuláció már fut (init_flag == 0u), a momentumokat normálisan a múltból olvassuk be!
-        k_past = get_metric(OLD,address, MOMENTS);
+        k_past = get_metric(OLD,address, MOMENT);
     }
     let ricci = get_metric(OLD,address, RICCI);
     set_metric(NEW,address,RICCI,ricci);  // only for check in CPU
-    let scalars = get_scalars(NEW,address);
+    let scalars = get_vec1(NEW,address);
     let brackets = scalars.w;
 
-    // Kiszámítjuk mind a 10 új momentum-komponenst az Euler-szabály szerint
     var next_k: MetricPoint;
-    for (var r = 0u; r < 10u; r = r + 1u) {
-        next_k[r] = k_past[r] + dims.dt * (brackets * g_past[r] - ricci[r]);
-    }
-    set_metric(NEW,address,MOMENTS,next_k);
-
-    // 2. ÚJ METRIKA (Kinematikai Euler szabály: g_new = g_old - 2 * dt * k_new)
     var next_g: MetricPoint;
     for (var r = 0u; r < 10u; r = r + 1u) {
+        // Kiszámítjuk mind a 10 új momentum-komponenst az Euler-szabály szerint
+        next_k[r] = k_past[r] + dims.dt * (brackets * g_past[r] - ricci[r]);
+        // 2. ÚJ METRIKA (Kinematikai Euler szabály: g_new = g_old - 2 * dt * k_new)
         next_g[r] = g_past[r] - 2.0 * dims.dt * next_k[r];
     }
+    set_metric(NEW,address,MOMENT,next_k);
     set_metric(NEW,address,METRIC,next_g);
-
-    let i_past = get_metric(OLD,address, INVERSE); // only for check in CPU
-    set_metric(NEW,address,INVERSE,i_past);
+    let i_past = get_metric(OLD,address, INVERZ); // only for check in CPU
+    set_metric(NEW,address,INVERZ,i_past);
 
 }
 // ==========================================
@@ -808,9 +911,9 @@ fn phase5(@builtin(global_invocation_id) id: vec3<u32>) {
     let address = check_idx(id);
     if (address < 0) { return; }
 
-    // Kézzel kibontott, ultra-gyors unrolled ciklus a 44 elem átmásolására
+    // Kézzel kibontott, ultra-gyors unrolled ciklus a 48 elem átmásolására
     // Így a GPU textúra/puffer betöltő egységei maximális sávszélességgel dolgoznak
-    for (var s = 0; s < 44; s = s + 1) {
+    for (var s = 0; s < 48; s = s + 1) {
         buff_old[address].a[s] = buff_new[address].a[s];
     }
 }
