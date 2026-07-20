@@ -41,6 +41,23 @@ const MOMENTS: i32 = 10;
 const INVERSE: i32 = 20;
 const METRIC: i32 = 30;
 
+const _00: i32 = 0;
+const _11: i32 = 1;
+const _22: i32 = 2;
+const _33: i32 = 3;
+const _01: i32 = 4;
+const _10: i32 = 4;
+const _02: i32 = 5;
+const _20: i32 = 5;
+const _03: i32 = 6;
+const _30: i32 = 6;
+const _12: i32 = 7;
+const _21: i32 = 7;
+const _13: i32 = 8;
+const _31: i32 = 8;
+const _23: i32 = 9;
+const _32: i32 = 9;
+
 fn check_idx(id: vec3<u32>) -> i32 {
     if (id.x >= dims.width || id.y >= dims.height || id.z >= dims.depth) { return -1; }
     return i32(id.x + (id.y + id.z * dims.height) * dims.width);
@@ -670,7 +687,7 @@ fn compute_weyl_squared(K: f32, Rc: Ricci10, g_inv: MetricPoint, R_scalar: f32) 
             ricci_squared += r_down_uv * r_up_uv;
         }
     }
-    let C2 = K - 2.0 * ricci_squared + (1.0 / 3.0) * R_scalar * R_scalar;
+    let C2 = K * K - 2.0 * ricci_squared + (1.0 / 3.0) * R_scalar * R_scalar;
     return max(0.0, C2);
 }
 
@@ -691,9 +708,9 @@ fn phase3(@builtin(global_invocation_id) coords: vec3<u32>) {
     let R20_tensor  = compute_riemann_20(address, ch_center, g_past);
     let Rc_tensor = compute_ricci(R20_tensor, i_past);
     let R_scalar  = compute_ricci_scalar(Rc_tensor, i_past);
-    let K_scalar  = compute_kretschmann(R20_tensor);
-    let C2_scalar = compute_weyl_squared(K_scalar, Rc_tensor, i_past, R_scalar);
-    let brackets = 0.5 * R_scalar + 0.5 * sqrt(K_scalar) + sqrt(C2_scalar);
+    let K_scalar  = sqrt(compute_kretschmann(R20_tensor));
+    let C2_scalar = sqrt(compute_weyl_squared(K_scalar, Rc_tensor, i_past, R_scalar));
+    let brackets = 0.5 * R_scalar + 0.5 * K_scalar + C2_scalar;
     
     let scalars = vec4<f32>(R_scalar, K_scalar, C2_scalar, brackets);
     set_scalars(NEW,address, scalars);
@@ -758,6 +775,7 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
         k_past = get_metric(OLD,address, MOMENTS);
     }
     let ricci = get_metric(OLD,address, RICCI);
+    set_metric(NEW,address,RICCI,ricci);  // only for check in CPU
     let scalars = get_scalars(NEW,address);
     let brackets = scalars.w;
 
@@ -774,6 +792,10 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
         next_g[r] = g_past[r] - 2.0 * dims.dt * next_k[r];
     }
     set_metric(NEW,address,METRIC,next_g);
+
+    let i_past = get_metric(OLD,address, INVERSE); // only for check in CPU
+    set_metric(NEW,address,INVERSE,i_past);
+
 }
 // ==========================================
 

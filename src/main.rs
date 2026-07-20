@@ -62,8 +62,8 @@ struct GpuInterface {
     #[allow(unused)]
     pub buffer_b: wgpu::Buffer,
     //pub staging_buffer: wgpu::Buffer,
-    //pub device: Arc<wgpu::Device>,
-    //pub queue: Arc<wgpu::Queue>,
+    pub device: Arc<wgpu::Device>,
+    pub queue: Arc<wgpu::Queue>,
 }
 
 #[repr(C)]
@@ -89,10 +89,8 @@ impl GpuInterface {
             return None;
         }
 
-        //let device = render_state.device.clone();
-        //let queue = render_state.queue.clone();
-        let device = &render_state.device;
-        let queue = &render_state.queue;
+        let device = render_state.device.clone();
+        let queue = render_state.queue.clone();
         println!("limits.max_storage_buffers_per_shader_stage : {:?}",limits.max_storage_buffers_per_shader_stage );
 
         let dims_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -259,8 +257,8 @@ impl GpuInterface {
             buffer_a: buffer_a,
             buffer_b: buffer_b,
             //staging_buffer: staging_buffer,
-            //device: device,//.into(),
-            //queue: queue,//.into(),
+            device: device.into(),
+            queue: queue.into(),
         })
     }
 }
@@ -277,6 +275,7 @@ struct SpacetimeApp {
     pub selected_scalar: i32, // 0: R, 1: K, 2: C2, 3: Feszültség 
     pub min_val: f32,
     pub max_val: f32,
+    pub is_running: bool,
 }
 
 impl SpacetimeApp {
@@ -285,7 +284,7 @@ impl SpacetimeApp {
         let height = 50;
         let depth  = 50;
         let dx: f32 = 0.01;
-        let dt: f32 = dx * 0.00001;
+        let dt: f32 = dx * 0.0001;
         let grid = SpacetimeGrid::new(width, height, depth, dx);
         let dims_data = GridDimensions { width: width, height: height, depth: depth, dx: dx, dt: dt, step_index: 0, init_flag: 1, pad2: 0,};
         Self {
@@ -298,6 +297,189 @@ impl SpacetimeApp {
             selected_scalar: 30, // 0: R, 1: K, 2: C2, 3: Feszültség    
             min_val: 0.0,
             max_val: 0.0,
+            is_running: false,
+        }
+    }
+    
+    fn run_one_simulation_step( &mut self) {
+        println!("Számítás indítása a GPU-n...");
+        
+        if let Some(interface) = &self.gpu_interface {
+            let device = &interface.device;
+            let queue = &interface.queue;
+
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Spacetime Command Encoder"),
+            });
+
+            // @compute @workgroup_size(4, 4, 4)
+            let workgroups_x = (self.grid.width + 3) / 4;
+            let workgroups_y = (self.grid.height + 3) / 4;
+            let workgroups_z = (self.grid.depth + 3) / 4;
+            
+            {
+                let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Spacetime Compute Pass"),
+                    timestamp_writes: None,
+                });
+                
+                compute_pass.set_bind_group(0, &interface.bind_group, &[]);
+
+                queue.write_buffer(&interface.dims_buffer, 0, bytemuck::bytes_of(&self.dims_data));
+                
+
+                compute_pass.set_pipeline(&interface.compute_pipeline_1);
+                compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+
+                compute_pass.set_pipeline(&interface.compute_pipeline_2);
+                compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+
+                compute_pass.set_pipeline(&interface.compute_pipeline_3);
+                compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+
+                compute_pass.set_pipeline(&interface.compute_pipeline_4);                        
+                compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+
+                compute_pass.set_pipeline(&interface.compute_pipeline_5);                        
+                compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+            }
+            println!("Számítás befejezése a GPU-n...");
+
+            let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Staging Buffer"),
+                size: interface.io_buffer_size,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            encoder.copy_buffer_to_buffer( &interface.buffer_a, 0, &staging_buffer, 0, interface.io_buffer_size );
+
+            //interface.queue.submit(Some(encoder.finish()));
+            queue.submit(std::iter::once(encoder.finish()));
+            
+// version A
+            let total_f32_elements = (self.grid.width * self.grid.height * self.grid.depth) as usize * 44;
+            let mut local_data_copy = vec![0.0f32; total_f32_elements];
+            
+            let buffer_slice = staging_buffer.slice(..);
+            let (sender, receiver) = std::sync::mpsc::channel();
+            buffer_slice.map_async(wgpu::MapMode::Read, move |v| { let _ = sender.send(v);});
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+            if let Ok(Ok(())) = receiver.try_recv() {
+                {
+                    let data_view = buffer_slice.get_mapped_range();
+                    let result_data: &[f32] = bytemuck::cast_slice(&data_view);
+                    local_data_copy.copy_from_slice(result_data);
+                    drop(data_view);
+                }
+            }
+            else {
+                println!("Hiba: A GPU nem tudta megfelelően feltérképezni a memóriát!");
+            }
+            staging_buffer.unmap();
+// version C
+            /*let device_clone = interface.device.clone();
+            let staging_buffer_clone = interface.staging_buffer.clone();                    
+            let total_f32_elements = (self.grid.width * self.grid.height * self.grid.depth) as usize * 44;
+            let (sender, receiver) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let buffer_slice = staging_buffer_clone.slice(..);
+                let (map_sender, map_receiver) = std::sync::mpsc::channel();
+                buffer_slice.map_async(wgpu::MapMode::Read, move |res| { let _ = map_sender.send(res); });
+                let _ = device_clone.poll(wgpu::PollType::wait_indefinitely());
+                if let Ok(Ok(())) = map_receiver.recv() {
+                    let data_view = buffer_slice.get_mapped_range();
+                    let result_data: &[f32] = bytemuck::cast_slice(&data_view);
+                    let mut local_copy = vec![0.0f32; total_f32_elements];
+                    local_copy.copy_from_slice(result_data);
+                    drop(data_view);
+                    staging_buffer_clone.unmap();
+                    let _ = sender.send(local_copy);
+                }
+            });
+            if let Ok(local_data_copy) = receiver.recv() {
+                println!("Az időlépés sikeresen lefutott, a háttérszál átadta a valós adatokat!");
+                let mut src_f32_idx = 0;
+                for p in &mut self.grid.data {
+                    p.data.copy_from_slice(&local_data_copy[src_f32_idx..src_f32_idx + 44]);
+                    src_f32_idx += 44;
+                }
+                self.dims_data.step_index += 1;
+                self.dims_data.init_flag = 0; // Az első időlépés után az inicializáció örökre kikapcsol
+                let ctx_clone = ui.ctx().clone();
+                self.sclice_statistic(&ctx_clone);
+                //redraw = true;
+            }*/
+// version B
+            // Létrehozunk egy szálbiztos Atomic bool-t az aszinkron állapot követésére
+            /*
+            let buffer_slice = interface.staging_buffer.slice(..);
+            use std::sync::atomic::{AtomicBool, Ordering};
+            use std::sync::Arc;
+            let is_mapped = Arc::new(AtomicBool::new(false));
+            let is_mapped_clone = is_mapped.clone();
+
+            // Regisztráljuk a callback-et, ami CSAK átbillenti a flag-et, ha kész a GPU
+            buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+                if result.is_ok() {
+                    is_mapped_clone.store(true, Ordering::SeqCst);
+                }
+            });
+            
+            let mut safety_timeout = 0;
+            while !is_mapped.load(Ordering::SeqCst) && safety_timeout < 50000 {
+                // Ha a verziód a kisbetűs formát kéri, írd át wgpu::PollType::poll()-ra
+                let _ = interface.device.poll(wgpu::PollType::Poll); 
+                std::thread::yield_now(); // Minimális processzor pihentetés
+                safety_timeout += 1;
+            }
+
+            let total_f32_elements = (self.grid.width * self.grid.height * self.grid.depth) as usize * 44;
+            let mut local_data_copy = vec![0.0f32; total_f32_elements];
+
+            // Ha a flag sikeresen átbillent, az adat GARANTÁLTAN ott van és nyitható!
+            if is_mapped.load(Ordering::SeqCst) {
+                {
+                    let data_view = buffer_slice.get_mapped_range();
+                    let result_data: &[f32] = bytemuck::cast_slice(&data_view);
+                    
+                    // Gyors memóriamásolással áttöltjük a lokális f32-es vektorunkba
+                    local_data_copy.copy_from_slice(result_data);
+                } // <-- A data_view ITT SZIGORÚAN és azonnal MEGSEMMISÜL!
+
+                // Kötelezően és garantáltan lezárjuk a puffert a következő kör előtt!
+                println!("eredmény visszaolvasva");
+            } else {
+                println!("Hiba: Időtúllépés, a GPU nem tudta időben leképezni a memóriát!");
+            }
+            interface.staging_buffer.unmap();*/
+            
+            
+            /*while !is_mapped.load(Ordering::SeqCst) {
+                let _ = interface.device.poll(wgpu::PollType::Poll);
+                std::thread::yield_now(); 
+            }
+            println!("Az időlépés sikeresen lefutott a videókártyán!");
+
+            let total_f32_elements = (self.grid.width * self.grid.height * self.grid.depth) as usize * 44;
+            let mut local_data_copy = vec![0.0f32; total_f32_elements];
+            {
+                let data_view = buffer_slice.get_mapped_range();
+                let result_data: &[f32] = bytemuck::cast_slice(&data_view);
+                local_data_copy.copy_from_slice(result_data);
+                drop(data_view);
+            }*/
+// end of version B                
+            //interface.staging_buffer.unmap();
+
+            let mut src_f32_idx = 0;
+            for p in &mut self.grid.data {
+                p.data.copy_from_slice(&local_data_copy[src_f32_idx..src_f32_idx + 44]);
+                src_f32_idx += 44;
+            }
+
+            self.dims_data.step_index += 1;
+            self.dims_data.init_flag = 0; // Az első időlépés után az inicializáció örökre kikapcsol
+            println!("eredmény visszaolvasva {}",self.dims_data.step_index);
         }
     }
     
@@ -387,8 +569,8 @@ impl eframe::App for SpacetimeApp {
                 if let Some(render_state) = frame.wgpu_render_state() {
                     println!("Most már van GPU állapota, indulhat a gpu_init...");
                     if let Some(interface) = GpuInterface::init(render_state, &self) {
-                        redraw = true;
                         self.gpu_interface = Some(interface);
+                        redraw = true;
                         println!("GPU INTERFÉSZ KÉSZ!");
                     }
                 }
@@ -403,190 +585,31 @@ impl eframe::App for SpacetimeApp {
                 ui.label(format!("Aktuális időlépés (t): {}", self.dims_data.step_index));
             });
 
+            // IDŐLÉPÉST VEZÉRLŐ GOMBOK
+            ui.horizontal(|ui| {
+                if ui.button("Egy időlépés").clicked() {
+                    self.run_one_simulation_step();
+                    redraw = true;
+                }
+
+                // START / STOP GOMB
+                let button_text = if self.is_running { "⏸ Szimuláció LEÁLLÍTÁSA" } else { "▶ Szimuláció INDÍTÁSA" };
+                if ui.button(button_text).clicked() {
+                    self.is_running = !self.is_running;
+                }
+                // AUTOMATIKUS MEGHÍVÁS: Ha fut a szimuláció, minden frame-en végrehajtunk egy időlépést
+                if self.is_running {
+                    self.run_one_simulation_step();
+                    self.sclice_statistic(ctx);
+                    // Kényszerítjük az egui-t, hogy azonnal hívja meg újra a UI-t (folyamatos animáció)
+                    ui.ctx().request_repaint();
+                }
+            });
+
+
             // 3. A GOMBNYOMÁSRA KÖZVETLENÜL INDÍTJUK A SZÁMÍTÁST (Nincs async deadlock)
             if ui.button("Görbületi Feszültség Számítása").clicked() {
-                println!("Számítás indítása a GPU-n...");
                 
-                if let Some(interface) = &self.gpu_interface {
-                if let Some(render_state) = frame.wgpu_render_state() {
-                let device = &render_state.device;
-                let queue = &render_state.queue;
-
-                    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("Spacetime Command Encoder"),
-                    });
-
-                    // @compute @workgroup_size(4, 4, 4)
-                    let workgroups_x = (self.grid.width + 3) / 4;
-                    let workgroups_y = (self.grid.height + 3) / 4;
-                    let workgroups_z = (self.grid.depth + 3) / 4;
-                    
-                    {
-                        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                            label: Some("Spacetime Compute Pass"),
-                            timestamp_writes: None,
-                        });
-                        
-                        compute_pass.set_bind_group(0, &interface.bind_group, &[]);
-
-                        queue.write_buffer(&interface.dims_buffer, 0, bytemuck::bytes_of(&self.dims_data));
-                        
-
-                        compute_pass.set_pipeline(&interface.compute_pipeline_1);
-                        compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
-
-                        compute_pass.set_pipeline(&interface.compute_pipeline_2);
-                        compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
-
-                        compute_pass.set_pipeline(&interface.compute_pipeline_3);
-                        compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
-
-                        compute_pass.set_pipeline(&interface.compute_pipeline_4);                        
-                        compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
-
-                        compute_pass.set_pipeline(&interface.compute_pipeline_5);                        
-                        compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
-                    }
-                    println!("Számítás befejezése a GPU-n...");
-
-                    let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("Staging Buffer"),
-                        size: interface.io_buffer_size,
-                        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                        mapped_at_creation: false,
-                    });
-                    encoder.copy_buffer_to_buffer( &interface.buffer_a, 0, &staging_buffer, 0, interface.io_buffer_size );
-
-                    //interface.queue.submit(Some(encoder.finish()));
-                    queue.submit(std::iter::once(encoder.finish()));
-                    
-// version A
-                    let total_f32_elements = (self.grid.width * self.grid.height * self.grid.depth) as usize * 44;
-                    let mut local_data_copy = vec![0.0f32; total_f32_elements];
-                    
-                    let buffer_slice = staging_buffer.slice(..);
-                    let (sender, receiver) = std::sync::mpsc::channel();
-                    buffer_slice.map_async(wgpu::MapMode::Read, move |v| { let _ = sender.send(v);});
-                    let _ = device.poll(wgpu::PollType::wait_indefinitely());
-                    if let Ok(Ok(())) = receiver.try_recv() {
-                        {
-                            let data_view = buffer_slice.get_mapped_range();
-                            let result_data: &[f32] = bytemuck::cast_slice(&data_view);
-                            local_data_copy.copy_from_slice(result_data);
-                            drop(data_view);
-                        }
-                    }
-                    else {
-                        println!("Hiba: A GPU nem tudta megfelelően feltérképezni a memóriát!");
-                    }
-                    staging_buffer.unmap();
-// version C
-                    /*let device_clone = interface.device.clone();
-                    let staging_buffer_clone = interface.staging_buffer.clone();                    
-                    let total_f32_elements = (self.grid.width * self.grid.height * self.grid.depth) as usize * 44;
-                    let (sender, receiver) = std::sync::mpsc::channel();
-                    std::thread::spawn(move || {
-                        let buffer_slice = staging_buffer_clone.slice(..);
-                        let (map_sender, map_receiver) = std::sync::mpsc::channel();
-                        buffer_slice.map_async(wgpu::MapMode::Read, move |res| { let _ = map_sender.send(res); });
-                        let _ = device_clone.poll(wgpu::PollType::wait_indefinitely());
-                        if let Ok(Ok(())) = map_receiver.recv() {
-                            let data_view = buffer_slice.get_mapped_range();
-                            let result_data: &[f32] = bytemuck::cast_slice(&data_view);
-                            let mut local_copy = vec![0.0f32; total_f32_elements];
-                            local_copy.copy_from_slice(result_data);
-                            drop(data_view);
-                            staging_buffer_clone.unmap();
-                            let _ = sender.send(local_copy);
-                        }
-                    });
-                    if let Ok(local_data_copy) = receiver.recv() {
-                        println!("Az időlépés sikeresen lefutott, a háttérszál átadta a valós adatokat!");
-                        let mut src_f32_idx = 0;
-                        for p in &mut self.grid.data {
-                            p.data.copy_from_slice(&local_data_copy[src_f32_idx..src_f32_idx + 44]);
-                            src_f32_idx += 44;
-                        }
-                        self.dims_data.step_index += 1;
-                        self.dims_data.init_flag = 0; // Az első időlépés után az inicializáció örökre kikapcsol
-                        let ctx_clone = ui.ctx().clone();
-                        self.sclice_statistic(&ctx_clone);
-                        //redraw = true;
-                    }*/
-// version B
-                    // Létrehozunk egy szálbiztos Atomic bool-t az aszinkron állapot követésére
-                    /*
-                    let buffer_slice = interface.staging_buffer.slice(..);
-                    use std::sync::atomic::{AtomicBool, Ordering};
-                    use std::sync::Arc;
-                    let is_mapped = Arc::new(AtomicBool::new(false));
-                    let is_mapped_clone = is_mapped.clone();
-
-                    // Regisztráljuk a callback-et, ami CSAK átbillenti a flag-et, ha kész a GPU
-                    buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
-                        if result.is_ok() {
-                            is_mapped_clone.store(true, Ordering::SeqCst);
-                        }
-                    });
-                    
-                    let mut safety_timeout = 0;
-                    while !is_mapped.load(Ordering::SeqCst) && safety_timeout < 50000 {
-                        // Ha a verziód a kisbetűs formát kéri, írd át wgpu::PollType::poll()-ra
-                        let _ = interface.device.poll(wgpu::PollType::Poll); 
-                        std::thread::yield_now(); // Minimális processzor pihentetés
-                        safety_timeout += 1;
-                    }
-
-                    let total_f32_elements = (self.grid.width * self.grid.height * self.grid.depth) as usize * 44;
-                    let mut local_data_copy = vec![0.0f32; total_f32_elements];
-
-                    // Ha a flag sikeresen átbillent, az adat GARANTÁLTAN ott van és nyitható!
-                    if is_mapped.load(Ordering::SeqCst) {
-                        {
-                            let data_view = buffer_slice.get_mapped_range();
-                            let result_data: &[f32] = bytemuck::cast_slice(&data_view);
-                            
-                            // Gyors memóriamásolással áttöltjük a lokális f32-es vektorunkba
-                            local_data_copy.copy_from_slice(result_data);
-                        } // <-- A data_view ITT SZIGORÚAN és azonnal MEGSEMMISÜL!
-
-                        // Kötelezően és garantáltan lezárjuk a puffert a következő kör előtt!
-                        println!("eredmény visszaolvasva");
-                    } else {
-                        println!("Hiba: Időtúllépés, a GPU nem tudta időben leképezni a memóriát!");
-                    }
-                    interface.staging_buffer.unmap();*/
-                    
-                    
-                    /*while !is_mapped.load(Ordering::SeqCst) {
-                        let _ = interface.device.poll(wgpu::PollType::Poll);
-                        std::thread::yield_now(); 
-                    }
-                    println!("Az időlépés sikeresen lefutott a videókártyán!");
-
-                    let total_f32_elements = (self.grid.width * self.grid.height * self.grid.depth) as usize * 44;
-                    let mut local_data_copy = vec![0.0f32; total_f32_elements];
-                    {
-                        let data_view = buffer_slice.get_mapped_range();
-                        let result_data: &[f32] = bytemuck::cast_slice(&data_view);
-                        local_data_copy.copy_from_slice(result_data);
-                        drop(data_view);
-                    }*/
-// end of version B                
-                    //interface.staging_buffer.unmap();
-
-                    let mut src_f32_idx = 0;
-                    for p in &mut self.grid.data {
-                        p.data.copy_from_slice(&local_data_copy[src_f32_idx..src_f32_idx + 44]);
-                        src_f32_idx += 44;
-                    }
-                    redraw = true;
-
-                    self.dims_data.step_index += 1;
-                    self.dims_data.init_flag = 0; // Az első időlépés után az inicializáció örökre kikapcsol
-                    println!("eredmény visszaolvasva");
-                }
-                }
 
             }
             ui.separator();
@@ -599,39 +622,43 @@ impl eframe::App for SpacetimeApp {
                                 .stroke(egui::Stroke::new(1.5, egui::Color32::LIGHT_GRAY))
                                 .show(ui, |ui| {
                                     let image_response = ui.image((texture.id(), egui::vec2(size, size)));
-                                    if let Some(hover_pos) = image_response.hover_pos() {
-                                        let rect = image_response.rect;
-                                        let local_x = hover_pos.x - rect.min.x;
-                                        let local_y = hover_pos.y - rect.min.y;
-                                        let width = self.grid.width as usize;
-                                        let height = self.grid.height as usize;
-                                        let depth = self.grid.depth as usize;
-                                        let grid_x = ((local_x / size) * width as f32) as usize;
-                                        let grid_y = ((local_y / size) * height as f32) as usize;
-                                        let grid_z = self.selected_z_slice as usize;
-                                        if grid_x < width && grid_y < height && grid_z < depth {
-                                            let idx_1d = grid_x + (grid_y * width) + (grid_z * width * height);
-                                            let r_val    = self.grid.data[idx_1d].data[40];
-                                            let k_val    = self.grid.data[idx_1d].data[41];
-                                            let c2_val   = self.grid.data[idx_1d].data[42];
-                                            let br_val   = self.grid.data[idx_1d].data[43];
-                                            #[allow(deprecated)]
-                                            egui::show_tooltip_at(
-                                                ctx,
-                                                ui.layer_id(),
-                                                egui::Id::new("grid_tooltip"),
-                                                ctx.pointer_latest_pos().unwrap_or(egui::Pos2::ZERO) + egui::vec2(20.0, 20.0),
-                                                |ui: &mut egui::Ui| {
-                                                ui.heading(format!("Rácspont: ({}, {}, {})",
-                                                    grid_x as i32-self.grid.width as i32/2,
-                                                    grid_y as i32-self.grid.height as i32/2,
-                                                    grid_z as i32-self.grid.depth as i32/2));
-                                                ui.separator();
-                                                ui.label(format!("Ricci Skalár (R): {:.6}", r_val));
-                                                ui.label(format!("Kretschmann  (K): {:.6}", k_val));
-                                                ui.label(format!("Weyl-négyzet (C²): {:.6}", c2_val));
-                                                ui.label(format!("Grav. Feszültség: {:.6}", br_val));
-                                            });
+                                    if !self.is_running {
+                                        if let Some(hover_pos) = image_response.hover_pos() {
+                                            let rect = image_response.rect;
+                                            let local_x = hover_pos.x - rect.min.x;
+                                            let local_y = hover_pos.y - rect.min.y;
+                                            let width = self.grid.width as usize;
+                                            let height = self.grid.height as usize;
+                                            let depth = self.grid.depth as usize;
+                                            let grid_x = ((local_x / size) * width as f32) as usize;
+                                            let grid_y = ((local_y / size) * height as f32) as usize;
+                                            let grid_z = self.selected_z_slice as usize;
+                                            if grid_x < width && grid_y < height && grid_z < depth {
+                                                let idx_1d = grid_x + (grid_y * width) + (grid_z * width * height);
+                                                let g12_val    = self.grid.data[idx_1d].data[37];
+                                                let r_val    = self.grid.data[idx_1d].data[40];
+                                                let k_val    = self.grid.data[idx_1d].data[41];
+                                                let c2_val   = self.grid.data[idx_1d].data[42];
+                                                let br_val   = self.grid.data[idx_1d].data[43];
+                                                #[allow(deprecated)]
+                                                egui::show_tooltip_at(
+                                                    ctx,
+                                                    ui.layer_id(),
+                                                    egui::Id::new("grid_tooltip"),
+                                                    ctx.pointer_latest_pos().unwrap_or(egui::Pos2::ZERO) + egui::vec2(20.0, 20.0),
+                                                    |ui: &mut egui::Ui| {
+                                                    ui.heading(format!("Rácspont: ({}, {}, {})",
+                                                        grid_x as i32-self.grid.width as i32/2,
+                                                        grid_y as i32-self.grid.height as i32/2,
+                                                        grid_z as i32-self.grid.depth as i32/2));
+                                                    ui.separator();
+                                                    ui.label(format!("g_12: {}", g12_val));
+                                                    ui.label(format!("Ricci Skalár (R): {:.6}", r_val));
+                                                    ui.label(format!("Kretschmann  (K): {:.6}", k_val));
+                                                    ui.label(format!("Weyl-négyzet (C²): {:.6}", c2_val));
+                                                    ui.label(format!("Grav. Feszültség: {:.6}", br_val));
+                                                });
+                                            }
                                         }
                                     }
                                 });
