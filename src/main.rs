@@ -279,7 +279,7 @@ impl SpacetimeApp {
         let depth  = 50;
         let dx: f32 = 0.01;
         let dt: f32 = dx * 0.0001;
-        let m = 10.5;
+        let m = 0.8;
         let r0 = 0.6;
         let grid = SpacetimeGrid::new(width, height, depth, dx, m, r0);
         let dims_data = GridDimensions { width: width, height: height, depth: depth, dx: dx, dt: dt, step_index: 0, init_flag: 1, pad2: 0,};
@@ -777,6 +777,8 @@ impl SpacetimeGrid {
         let cy = self.height as f32 / 2.0;
         let cz = self.depth as f32 / 2.0;
 
+        let a_spin = 0.2; 
+
         for z in 0..self.depth {
             for y in 0..self.height {
                 for x in 0..self.width {
@@ -789,20 +791,42 @@ impl SpacetimeGrid {
                     
                     let r2 = rx*rx + ry*ry + rz*rz;
                     let r = r2.sqrt();
-
+                    let regularized_r = (r2 + self.r0*self.r0).sqrt();
                     // 1. SZABÁLYOSÍTOTT SCHWARZSCHILD IDŐ-FAKTOR (A te tágulási képleted)
                     let f = 1.0 - (2.0 * self.m * r2) / (r2 * r + self.r0 * self.r0 * self.r0);
                     
                     // 2. IZOTRÓP TÉRBELI FAKTOR (Nincs nullával való osztás!)
                     // Sima, folytonos átmenetet biztosít a végtelen távolság (1.0) és a mag között
-                    let regularized_r = (r2 + self.r0*self.r0).sqrt();
-                    let psi_factor = 1.0 + (2.0 * self.m) / regularized_r;
-
+                    
+                    /*let psi_factor = 1.0 + (2.0 * self.m) / regularized_r;
                     // 3. TENZOR ELEMEK BEÍRÁSA (idx = 0..9)
                     self.data[idx].data[30] = -f;          // g00 (Idő)
                     self.data[idx].data[31] = psi_factor;  // g11 (X térbeli)
                     self.data[idx].data[32] = psi_factor;  // g22 (Y térbeli)
-                    self.data[idx].data[33] = psi_factor;  // g33 (Z térbeli)
+                    self.data[idx].data[33] = psi_factor;  // g33 (Z térbeli)*/
+                    
+                    let denom = regularized_r * regularized_r + a_spin * a_spin;
+                    let l_0 = 1.0;
+                    let l_1 = (regularized_r * rx + a_spin * ry) / denom;
+                    let l_2 = (regularized_r * ry - a_spin * rx) / denom;
+                    let l_3 = rz / regularized_r;
+
+                    // Diagonális metrika (Minkowski + Kerr-Schild faktor)
+                    self.data[idx].data[30] = -1.0 + f * l_0 * l_0;
+                    self.data[idx].data[31] =  1.0 + f * l_1 * l_1;
+                    self.data[idx].data[32] =  1.0 + f * l_2 * l_2;
+                    self.data[idx].data[33] =  1.0 + f * l_3 * l_3;
+
+                    // BEINDÍTJUK A TÉRIDŐ KERESZT-TAGJAIT (Idő-Tér elcsavarodás)
+                    self.data[idx].data[34] = f * l_0 * l_1; // g01
+                    self.data[idx].data[35] = f * l_0 * l_2; // g02
+                    self.data[idx].data[36] = f * l_0 * l_3; // g03
+
+                    // Térbeli elcsavarodások (X-Y, X-Z, Y-Z)
+                    self.data[idx].data[37] = f * l_1 * l_2; // g12
+                    self.data[idx].data[38] = f * l_1 * l_3; // g13
+                    self.data[idx].data[39] = f * l_2 * l_3; // g23
+                    
 
                     // Kirajzoláshoz tesztként elmentjük a G feszültség helyére (s[3]) az f faktort
                     self.data[idx].data[43] = f; 

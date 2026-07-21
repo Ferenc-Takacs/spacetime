@@ -813,7 +813,26 @@ fn phase3(@builtin(global_invocation_id) coords: vec3<u32>) {
     let R_scalar  = compute_ricci_scalar(Rc_tensor, i_past);
     let K_scalar  = sqrt(compute_kretschmann(R20_tensor));
     let C2_scalar = sqrt(compute_weyl_squared(K_scalar, Rc_tensor, i_past, R_scalar));
-    let brackets = 0.5 * R_scalar + 0.5 * K_scalar + C2_scalar;
+    let raw_brackets = 0.5 * R_scalar + 0.5 * K_scalar + C2_scalar;
+
+    // 2. MEXIKÓI KALAP POTENCIÁL (Spontán Szimmetriasértő Flux Limiter)
+    // mu_sq határozza meg a kitörési küszöböt, a lambda pedig a stabilizációs falat
+    let mu_sq = 100.0;
+    let lambda = 0.0001;
+    
+    // A Higgs-típusú feszültség-módosító erő
+    let V_gradient = -mu_sq * raw_brackets + lambda * (raw_brackets * raw_brackets * raw_brackets);
+
+    // Ha a befelé irányuló nyomás túl nagy, ez a tag automatikusan átbillenti az előjelet, 
+    // és tágulási/forgatási kényszert (centrifugális elfordulást) hoz létre!
+    var brackets = raw_brackets - dims.dt * V_gradient;
+
+    // Végső kemény hardveres védelem, hogy a kerekítési hibák se tudják megütni a videókártyát
+    brackets = clamp(brackets, -1500.0, 1500.0);
+
+    //let lambda = 0.0001; 
+    //let saturation_factor = 1.0 / (1.0 + lambda * raw_brackets * raw_brackets);
+    //let brackets = raw_brackets * saturation_factor;
     
     let scalars = vec4<f32>(R_scalar, K_scalar, C2_scalar, brackets);
     set_vec1(NEW,address, scalars);
@@ -888,12 +907,36 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
 
     var next_k: MetricPoint;
     var next_g: MetricPoint;
+    // phase4 belső Euler loop frissítése:
     for (var r = 0u; r < 10u; r = r + 1u) {
+        var effective_forcing = brackets * g_past[r] - ricci[r];
+        
+        // MEXIKÓI KALAP CSATOLÁS: Ha a diagonális nyomás (r=0..3) eléri a kritikus szintet, 
+        // a túlfolyó energiát matematikailag átcsatornázzuk a kereszt-tagok (r=4..9) momentumába.
+        // Ez elindítja a g12, g13, g23 spontán kúszását, teljesen megvédve a diagonálisokat az összeomlástól!
+        if (r < 4u && abs(effective_forcing) > 800.0) {
+            // A diagonális fojtás energiáját átirányítjuk centrifugális nyírófeszültséggé
+            let overflow = effective_forcing * 0.05; 
+            next_k[7u] += overflow; // g12 gerjesztése
+            next_k[8u] += overflow; // g13 gerjesztése
+            next_k[9u] += overflow; // g23 gerjesztése
+            next_k[4u] += overflow; // g01 (Idő-X vektorpotenciál)
+            next_k[5u] += overflow; // g02 (Idő-Y vektorpotenciál)
+            next_k[6u] += overflow; // g03 (Idő-Z vektorpotenciál)
+            
+            // Magát a diagonális nyomást pedig lelapítjuk a kalap stabil peremvölgyébe
+            effective_forcing = clamp(effective_forcing, -800.0, 800.0);
+        }
+
+        next_k[r] = k_past[r] + dims.dt * effective_forcing;
+        next_g[r] = g_past[r] - 2.0 * dims.dt * next_k[r];
+    }
+    /*for (var r = 0u; r < 10u; r = r + 1u) {
         // Kiszámítjuk mind a 10 új momentum-komponenst az Euler-szabály szerint
         next_k[r] = k_past[r] + dims.dt * (brackets * g_past[r] - ricci[r]);
         // 2. ÚJ METRIKA (Kinematikai Euler szabály: g_new = g_old - 2 * dt * k_new)
         next_g[r] = g_past[r] - 2.0 * dims.dt * next_k[r];
-    }
+    }*/
     set_metric(NEW,address,MOMENT,next_k);
     set_metric(NEW,address,METRIC,next_g);
     let i_past = get_metric(OLD,address, INVERZ); // only for check in CPU
