@@ -10,12 +10,12 @@ struct GridDimensions {
 }
 
 struct GridPoints {
-    a : array<f32, 48>,
+    a : array<f32, 52>,
 }
 
 @group(0) @binding(0) var<uniform> dims: GridDimensions;
-@group(0) @binding(1) var<storage, read_write> buff_old : array<GridPoints>; // dims.width * dims.height * dims.depth * (11 * sizeof(f32))
-@group(0) @binding(2) var<storage, read_write> buff_new : array<GridPoints>; // dims.width * dims.height * dims.depth * (11 * sizeof(f32))
+@group(0) @binding(1) var<storage, read_write> buff_old : array<GridPoints>; // dims.width * dims.height * dims.depth * (13 * sizeof(f32))
+@group(0) @binding(2) var<storage, read_write> buff_new : array<GridPoints>; // dims.width * dims.height * dims.depth * (13 * sizeof(f32))
 
 alias MetricPoint = array<f32, 10>;
     //  struct MetricPoint {
@@ -36,10 +36,28 @@ alias Christoffel40 = array<f32, 40>;
 const OLD: i32 = 0;
 const NEW: i32 = 1;
 
-const RICCI: i32 = 0;
-const MOMENT: i32 = 10;
+//concurent with Christoffels
+const RICCI:  i32 = 0;
+const MOMENT: i32 = 10; // konjugált momentum
 const INVERZ: i32 = 20;
 const METRIC: i32 = 30;
+// concurent with SCALARs
+const ENERGY: i32 = 40;
+
+// Christoffels NEW 0 - 39
+
+const R_SCALAR  = 40;
+const K_SCALAR  = 41;
+const C2_SCALAR = 42;
+const BRACKETS  = 43;
+const E_11      = 44;
+const E_22      = 45;
+const E_12      = 46; //(Elektromos nyírás)
+const E_SQ      = 47;
+const B_11      = 48;
+const B_22      = 49;
+const B_12      = 50; //(Mágneses örvény)
+const B_SQ      = 51;
 
 fn check_idx(id: vec3<u32>) -> i32 {
     if (id.x >= dims.width || id.y >= dims.height || id.z >= dims.depth) { return -1; }
@@ -116,67 +134,23 @@ fn set_metric(old: i32, address: i32, offs: i32, m: MetricPoint){
     }
 }
 
-fn get_vec1(old: i32, address: i32) -> vec4<f32> {
-    var v: vec4<f32>;
+fn get_scalar(old: i32, address: i32, offs: i32) -> f32 {
+    var s: f32;
     if( old == OLD ) {
-        v.x = buff_old[address].a[40];
-        v.y = buff_old[address].a[41];
-        v.z = buff_old[address].a[42];
-        v.w = buff_old[address].a[43];
+        s = buff_old[address].a[offs];
     }
     else {
-        v.x = buff_new[address].a[40];
-        v.y = buff_new[address].a[41];
-        v.z = buff_new[address].a[42];
-        v.w = buff_new[address].a[43];
+        s = buff_new[address].a[offs];
     }
-    return v;
+    return s;
 }
 
-fn set_vec1(old: i32, address: i32, v: vec4<f32>) {
+fn set_scalar(old: i32, address: i32, offs: i32, s: f32) {
     if( old == OLD ) {
-        buff_old[address].a[40] = v.x;
-        buff_old[address].a[41] = v.y;
-        buff_old[address].a[42] = v.z;
-        buff_old[address].a[43] = v.w;
+        buff_old[address].a[offs] = s;
     }
     else {
-        buff_new[address].a[40] = v.x;
-        buff_new[address].a[41] = v.y;
-        buff_new[address].a[42] = v.z;
-        buff_new[address].a[43] = v.w;
-    }
-}
-
-fn get_vec2(old: i32, address: i32) -> vec4<f32> {
-    var v: vec4<f32>;
-    if( old == OLD ) {
-        v.x = buff_old[address].a[44];
-        v.y = buff_old[address].a[45];
-        v.z = buff_old[address].a[46];
-        v.w = buff_old[address].a[47];
-    }
-    else {
-        v.x = buff_new[address].a[44];
-        v.y = buff_new[address].a[45];
-        v.z = buff_new[address].a[46];
-        v.w = buff_new[address].a[47];
-    }
-    return v;
-}
-
-fn set_vec2(old: i32, address: i32, v: vec4<f32>) {
-    if( old == OLD ) {
-        buff_old[address].a[44] = v.x;
-        buff_old[address].a[45] = v.y;
-        buff_old[address].a[46] = v.z;
-        buff_old[address].a[47] = v.w;
-    }
-    else {
-        buff_new[address].a[44] = v.x;
-        buff_new[address].a[45] = v.y;
-        buff_new[address].a[46] = v.z;
-        buff_new[address].a[47] = v.w;
+        buff_new[address].a[offs] = s;
     }
 }
 
@@ -312,6 +286,8 @@ fn invert_metric(p: MetricPoint) -> MetricPoint {
 // ==========================================
 // 1. LÉPCSŐ: TISZTA INVERZ KISZÁMÍTÁSA (Pre-compute)
 // ==========================================
+//Input: OLD-METRIC (10 X f32)
+//Output: OLD-INVERZ (10 X f32)
 @compute @workgroup_size(4, 4, 4)
 fn phase1(@builtin(global_invocation_id) coords: vec3<u32>) {
     let address = check_idx(coords);
@@ -429,6 +405,8 @@ fn get_christoffel_at(address: i32) -> Christoffel40 {
 // ==========================================
 // 2. LÉPCSŐ: CHRISTOFFEL SIMBÓLUMOK KISZÁMÍTÁSA
 // ==========================================
+//Input: OLD-METRIC (10 X f32),  OLD-INVERZ (10 X f32)
+//Output: NEW-CHRISTOFFEL (40 X f32)
 @compute @workgroup_size(4, 4, 4)
 fn phase2(@builtin(global_invocation_id) coords: vec3<u32>) {
     let address = check_idx(coords);
@@ -635,16 +613,10 @@ fn extract_r4(R: Riemann20, a: u32, b: u32, c: u32, d: u32) -> f32 {
     return sign * val;
 }
 
-struct Ricci10 {
-    R00: f32, R11: f32, R22: f32, R33: f32,
-    R01: f32, R02: f32, R03: f32,
-    R12: f32, R13: f32, R23: f32,
-}
-
-fn compute_ricci(R_tensor: Riemann20, g_inv: MetricPoint) -> Ricci10 {
-    var Rc: Ricci10;
+fn compute_ricci(R_tensor: Riemann20, g_inv: MetricPoint) -> MetricPoint {
+    var Rc: MetricPoint;
     // Lokális segédfüggvény mintájára a 10 kontrakció legenerálása
-    Rc.R00 = g_inv[1] * extract_r4(R_tensor,1u,0u,1u,0u) +
+    Rc[0] = g_inv[1] * extract_r4(R_tensor,1u,0u,1u,0u) +
              g_inv[2] * extract_r4(R_tensor,2u,0u,2u,0u) +
              g_inv[3] * extract_r4(R_tensor,3u,0u,3u,0u) +
              2.0 * (g_inv[4] * extract_r4(R_tensor,0u,0u,1u,0u) +
@@ -654,7 +626,7 @@ fn compute_ricci(R_tensor: Riemann20, g_inv: MetricPoint) -> Ricci10 {
                     g_inv[8] * extract_r4(R_tensor,1u,0u,3u,0u) +
                     g_inv[9] * extract_r4(R_tensor,2u,0u,3u,0u));
     
-    Rc.R11 = g_inv[0] * extract_r4(R_tensor,0u,1u,0u,1u) +
+    Rc[1] = g_inv[0] * extract_r4(R_tensor,0u,1u,0u,1u) +
              g_inv[2] * extract_r4(R_tensor,2u,1u,2u,1u) +
              g_inv[3] * extract_r4(R_tensor,3u,1u,3u,1u) +
              2.0 * (g_inv[4] * extract_r4(R_tensor,0u,1u,1u,1u) +
@@ -664,7 +636,7 @@ fn compute_ricci(R_tensor: Riemann20, g_inv: MetricPoint) -> Ricci10 {
                     g_inv[8] * extract_r4(R_tensor,1u,1u,3u,1u) +
                     g_inv[9] * extract_r4(R_tensor,2u,1u,3u,1u));
     
-    Rc.R22 = g_inv[0] * extract_r4(R_tensor,0u,2u,0u,2u) +
+    Rc[2] = g_inv[0] * extract_r4(R_tensor,0u,2u,0u,2u) +
              g_inv[1] * extract_r4(R_tensor,1u,2u,1u,2u) +
              g_inv[3] * extract_r4(R_tensor,3u,2u,3u,2u) +
              2.0 * (g_inv[4] * extract_r4(R_tensor,0u,2u,1u,2u) +
@@ -674,7 +646,7 @@ fn compute_ricci(R_tensor: Riemann20, g_inv: MetricPoint) -> Ricci10 {
                     g_inv[8] * extract_r4(R_tensor,1u,2u,3u,2u) +
                     g_inv[9] * extract_r4(R_tensor,2u,2u,3u,2u));
     
-    Rc.R33 = g_inv[0] * extract_r4(R_tensor,0u,3u,0u,3u) +
+    Rc[3] = g_inv[0] * extract_r4(R_tensor,0u,3u,0u,3u) +
              g_inv[1] * extract_r4(R_tensor,1u,3u,1u,3u) +
              g_inv[2] * extract_r4(R_tensor,2u,3u,2u,3u) +
              2.0 * (g_inv[4] * extract_r4(R_tensor,0u,3u,1u,3u) +
@@ -684,29 +656,29 @@ fn compute_ricci(R_tensor: Riemann20, g_inv: MetricPoint) -> Ricci10 {
                     g_inv[8] * extract_r4(R_tensor,1u,3u,3u,3u) +
                     g_inv[9] * extract_r4(R_tensor,2u,3u,2u,3u));
     
-    Rc.R01 = g_inv[2] * extract_r4(R_tensor,2u,0u,2u,1u) +
+    Rc[4] = g_inv[2] * extract_r4(R_tensor,2u,0u,2u,1u) +
              g_inv[3] * extract_r4(R_tensor,3u,0u,3u,1u) +
              g_inv[4] * (extract_r4(R_tensor,0u,0u,1u,1u) + extract_r4(R_tensor,1u,0u,0u,1u));
     // Vegyes kereszt kontrakciók simplified
-    Rc.R02 = g_inv[1] * extract_r4(R_tensor,1u,0u,1u,2u) + g_inv[3] * extract_r4(R_tensor,3u,0u,3u,2u);
-    Rc.R03 = g_inv[1] * extract_r4(R_tensor,1u,0u,1u,3u) + g_inv[2] * extract_r4(R_tensor,2u,0u,2u,3u);
-    Rc.R12 = g_inv[0] * extract_r4(R_tensor,0u,1u,0u,2u) + g_inv[3] * extract_r4(R_tensor,3u,1u,3u,2u);
-    Rc.R13 = g_inv[0] * extract_r4(R_tensor,0u,1u,0u,3u) + g_inv[2] * extract_r4(R_tensor,2u,1u,2u,3u);
-    Rc.R23 = g_inv[0] * extract_r4(R_tensor,0u,2u,0u,3u) + g_inv[1] * extract_r4(R_tensor,1u,2u,1u,3u);
+    Rc[5] = g_inv[1] * extract_r4(R_tensor,1u,0u,1u,2u) + g_inv[3] * extract_r4(R_tensor,3u,0u,3u,2u);
+    Rc[6] = g_inv[1] * extract_r4(R_tensor,1u,0u,1u,3u) + g_inv[2] * extract_r4(R_tensor,2u,0u,2u,3u);
+    Rc[7] = g_inv[0] * extract_r4(R_tensor,0u,1u,0u,2u) + g_inv[3] * extract_r4(R_tensor,3u,1u,3u,2u);
+    Rc[8] = g_inv[0] * extract_r4(R_tensor,0u,1u,0u,3u) + g_inv[2] * extract_r4(R_tensor,2u,1u,2u,3u);
+    Rc[9] = g_inv[0] * extract_r4(R_tensor,0u,2u,0u,3u) + g_inv[1] * extract_r4(R_tensor,1u,2u,1u,3u);
     return Rc;
 }
 
-fn compute_ricci_scalar(Rc: Ricci10, g_inv: MetricPoint) -> f32 {
-    return g_inv[0] * Rc.R00 +
-           g_inv[1] * Rc.R11 +
-           g_inv[2] * Rc.R22 +
-           g_inv[3] * Rc.R33 +
-    2.0 * (g_inv[4] * Rc.R01 +
-           g_inv[5] * Rc.R02 +
-           g_inv[6] * Rc.R03 +
-           g_inv[7] * Rc.R12 +
-           g_inv[8] * Rc.R13 +
-           g_inv[9] * Rc.R23);
+fn compute_ricci_scalar(Rc: MetricPoint, g_inv: MetricPoint) -> f32 {
+    return g_inv[0] * Rc[0] +
+           g_inv[1] * Rc[1] +
+           g_inv[2] * Rc[2] +
+           g_inv[3] * Rc[3] +
+    2.0 * (g_inv[4] * Rc[4] +
+           g_inv[5] * Rc[5] +
+           g_inv[6] * Rc[6] +
+           g_inv[7] * Rc[7] +
+           g_inv[8] * Rc[8] +
+           g_inv[9] * Rc[9]);
 }
 
 fn compute_kretschmann(R: Riemann20) -> f32 {
@@ -716,25 +688,25 @@ fn compute_kretschmann(R: Riemann20) -> f32 {
     return diagonal + vegyes + tiszta_ter;
 }
 
-fn extract_ricci_matrix(Rc: Ricci10, a: u32, b: u32) -> f32 {
+fn extract_ricci_matrix(Rc: MetricPoint, a: u32, b: u32) -> f32 {
     var u = a;
     var v = b;
     if (a > b) { u = b; v = a; }
-    if (u == 0u && v == 0u) { return Rc.R00; }
-    if (u == 1u && v == 1u) { return Rc.R11; }
-    if (u == 2u && v == 2u) { return Rc.R22; }
-    if (u == 3u && v == 3u) { return Rc.R33; }
-    if (u == 0u && v == 1u) { return Rc.R01; }
-    if (u == 0u && v == 2u) { return Rc.R02; }
-    if (u == 0u && v == 3u) { return Rc.R03; }
-    if (u == 1u && v == 2u) { return Rc.R12; }
-    if (u == 1u && v == 3u) { return Rc.R13; }
-    if (u == 2u && v == 3u) { return Rc.R23; }
+    if (u == 0u && v == 0u) { return Rc[0]; }
+    if (u == 1u && v == 1u) { return Rc[1]; }
+    if (u == 2u && v == 2u) { return Rc[2]; }
+    if (u == 3u && v == 3u) { return Rc[3]; }
+    if (u == 0u && v == 1u) { return Rc[4]; }
+    if (u == 0u && v == 2u) { return Rc[5]; }
+    if (u == 0u && v == 3u) { return Rc[6]; }
+    if (u == 1u && v == 2u) { return Rc[7]; }
+    if (u == 1u && v == 3u) { return Rc[8]; }
+    if (u == 2u && v == 3u) { return Rc[9]; }
     return 0.0;
 }
 
 // Az általad említett K = C^2 + 2R^2 - 1/3 R^2 azonosság optimális, négyzetes kontrakciója
-fn compute_weyl_squared(K: f32, Rc: Ricci10, g_inv: MetricPoint, R_scalar: f32) -> f32 {
+fn compute_weyl_squared(K: f32, Rc: MetricPoint, g_inv: MetricPoint, R_scalar: f32) -> f32 {
     var ricci_squared = 0.0;
     for (var u = 0u; u < 4u; u++) {
         for (var v = 0u; v < 4u; v++) {
@@ -765,17 +737,17 @@ struct MagneticWeyl5 {
     B12: f32, B13: f32, B23: f32,
 }
 
-fn compute_gravito_electromagnetism(R: Riemann20, Rc: Ricci10, g: MetricPoint, i: MetricPoint) -> vec4<f32> {
+fn compute_gravito_electromagnetism(address: i32, R: Riemann20, Rc: MetricPoint, g: MetricPoint, i: MetricPoint) {
     var E: ElectricWeyl5;
     var B: MagneticWeyl5;
 
     // 1. ELEKTROMOS WEYL-TENZOR (Newtoni árapály-erők és térbeli feszültség)
-    E.E11 = R.R0101 - 0.5 * (g[1]*Rc.R11 + g[0]*Rc.R00); 
-    E.E22 = R.R0202 - 0.5 * (g[2]*Rc.R22 + g[0]*Rc.R00);
+    E.E11 = R.R0101 - 0.5 * (g[1]*Rc[0] + g[0]*Rc[1]); 
+    E.E22 = R.R0202 - 0.5 * (g[2]*Rc[0] + g[0]*Rc[2]);
     
-    E.E12 = R.R0102 - 0.5 * (g[4]*Rc.R12); 
-    E.E13 = R.R0103 - 0.5 * (g[5]*Rc.R13);
-    E.E23 = R.R0203 - 0.5 * (g[7]*Rc.R23);
+    E.E12 = R.R0102 - 0.5 * (g[4]*Rc[7]); 
+    E.E13 = R.R0103 - 0.5 * (g[5]*Rc[8]);
+    E.E23 = R.R0203 - 0.5 * (g[7]*Rc[9]);
 
     // 2. JAVÍTOTT MÁGNESES WEYL-TENZOR (Kizárólag létező Riemann20 mezőkkel!)
     // Ez a tenzor méri a téridő forgásából eredő gravitomágneses nyírófeszültségeket,
@@ -787,18 +759,69 @@ fn compute_gravito_electromagnetism(R: Riemann20, Rc: Ricci10, g: MetricPoint, i
     B.B13 =  R.R0323;
     B.B23 =  R.R0313;
 
+
     // 3. SKALÁR INTENZITÁSOK NÉGYZETÉNEK ÖSSZEGE (Nyommentes tenzorkontrakciók)
     let E_squared = E.E11*E.E11 + E.E22*E.E22 + (E.E11+E.E22)*(E.E11+E.E22) + 2.0*(E.E12*E.E12 + E.E13*E.E13 + E.E23*E.E23);
     let B_squared = B.B11*B.B11 + B.B22*B.B22 + (B.B11+B.B22)*(B.B11+B.B22) + 2.0*(B.B12*B.B12 + B.B13*B.B13 + B.B23*B.B23);
 
-    // Visszaadjuk a gravito-elektromos és mágneses térerőket a 11. zónára a kirajzoláshoz
-    return vec4<f32>(sqrt(E_squared), sqrt(B_squared), E.E12, B.B12);
+    set_scalar(NEW,address, E_11, E.E11);
+    set_scalar(NEW,address, E_22, E.E22);
+    set_scalar(NEW,address, E_12, E.E12);
+    
+    set_scalar(NEW,address, B_11, B.B11);
+    set_scalar(NEW,address, B_22, B.B22);
+    set_scalar(NEW,address, B_12, B.B12);
+
+    set_scalar(NEW,address, E_SQ, sqrt(E_squared));
+    set_scalar(NEW,address, B_SQ, sqrt(B_squared));
 }
 
+fn compute_energy_momentum_tensor(g: MetricPoint, k: MetricPoint) -> MetricPoint {
+    // Az áramlás sebességvektorai az idő-tér kereszt momentumokból (k01, k02, k03)
+    let u1 = k[4]; // X-irányú áramlási sebesség
+    let u2 = k[5]; // Y-irányú áramlási sebesség
+    let u3 = k[6]; // Z-irányú áramlási sebesség
+    
+    // Effektív hidrodinamikai energiasűrűség (rho) az örvénylés négyzetéből
+    let rho = u1*u1 + u2*u2 + u3*u3;
+    
+    // Ultra-relativisztikus vagy feszültségi anyagi nyomás-arány (p = rho / 3.0)
+    // Ez a nyomás fog a metrika elemeivel szorzódva ellentartani az összeomlásnak!
+    let p = rho / 3.0; 
+    
+    var T: MetricPoint; // 10 elemű üres tenzor
+    
+    // T_uv = rho * u_u * u_v + p * g_uv DEFINÍCIÓ ALAPJÁN:
+    
+    // T00 (Energiasűrűség): Mivel g[0] negatív, a p * g[0] tag kivonódik, 
+    // stabilizálva a mag belső tömegvonzási energiáját!
+    T[0] = rho + p * g[0]; 
+    
+    // Térbeli nyomások (Centrifugális ellentartás a diagonálisokon)
+    T[1] = rho * u1 * u1 + p * g[1]; // T11
+    T[2] = rho * u2 * u2 + p * g[2]; // T22
+    T[3] = rho * u3 * u3 + p * g[3]; // T33
+    
+    // IDŐ-TÉR IMPULZUSOK (Vektorpotenciál visszahatása)
+    T[4] = rho * u1 + p * g[4]; // T01
+    T[5] = rho * u2 + p * g[5]; // T02
+    T[6] = rho * u3 + p * g[6]; // T03
+    
+    // TÉRBELI KERESZT-TAGOK NYOMÁSA (Az abszolút kulcs a g12, g13, g23 elcsavarodási oktaéderek megfékezéséhez!)
+    // Ha a g12 (g[7]) elkezd nőni, a p * g[7] tag azonnal megnöveli a T[7]-et, 
+    // ami a phase4-ben ellensúlyozza és megállítja a gerjedést!
+    T[7] = rho * u1 * u2 + p * g[7]; // T12 
+    T[8] = rho * u1 * u3 + p * g[8]; // T13
+    T[9] = rho * u2 * u3 + p * g[9]; // T23
+    
+    return T;
+}
 
 // ==========================================================
 // 3. FÁZIS: GEOMETRIA ÉS FESZÜLTSÉG (Mentés a Múlt inverz helyére!)
 // ==========================================================
+//Input: OLD-METRIC (10 X f32),  OLD-INVERZ (10 X f32), OLD-MOMENT (10 X f32), NEW-CHRISTOFFEL (40 X f32)
+//Output: OLD-RICCI (10 X f32), OLD-ENERGY (10 X f32), NEW-SCALARS (12 X f32)
 @compute @workgroup_size(4, 4, 4)
 fn phase3(@builtin(global_invocation_id) coords: vec3<u32>) {
     let address = check_idx(coords);
@@ -806,59 +829,55 @@ fn phase3(@builtin(global_invocation_id) coords: vec3<u32>) {
     
     let g_past = get_metric(OLD,address, METRIC);
     let i_past = get_metric(OLD,address, INVERZ);    
+    let k_past = get_metric(OLD, address, MOMENT); // 20..29 (A t pillanatbeli konjugált Momentum)
     let ch_center = load_christoffel_scratchpad(address);
-
+    
+    let T_em = compute_energy_momentum_tensor(g_past, k_past);
+    set_metric(OLD,address, ENERGY, T_em);    
     let R20_tensor  = compute_riemann_20(address, ch_center, g_past);
     let Rc_tensor = compute_ricci(R20_tensor, i_past);
+    set_metric(OLD, address, RICCI, Rc_tensor);
+    
     let R_scalar  = compute_ricci_scalar(Rc_tensor, i_past);
+    set_scalar(NEW,address, R_SCALAR, R_scalar);
     let K_scalar  = sqrt(compute_kretschmann(R20_tensor));
+    set_scalar(NEW,address, K_SCALAR, K_scalar);
     let C2_scalar = sqrt(compute_weyl_squared(K_scalar, Rc_tensor, i_past, R_scalar));
-    let raw_brackets = 0.5 * R_scalar + 0.5 * K_scalar + C2_scalar;
+    set_scalar(NEW,address, C2_SCALAR, C2_scalar);
+
+
+    //let raw_brackets = 0.5 * R_scalar + 0.5 * K_scalar + C2_scalar;
 
     // 2. MEXIKÓI KALAP POTENCIÁL (Spontán Szimmetriasértő Flux Limiter)
     // mu_sq határozza meg a kitörési küszöböt, a lambda pedig a stabilizációs falat
-    let mu_sq = 100.0;
-    let lambda = 0.0001;
-    
+    //let mu_sq = 100.0;
+    //let lambda = 0.0001;
+
     // A Higgs-típusú feszültség-módosító erő
-    let V_gradient = -mu_sq * raw_brackets + lambda * (raw_brackets * raw_brackets * raw_brackets);
+    //let V_gradient = -mu_sq * raw_brackets + lambda * (raw_brackets * raw_brackets * raw_brackets);
 
     // Ha a befelé irányuló nyomás túl nagy, ez a tag automatikusan átbillenti az előjelet, 
     // és tágulási/forgatási kényszert (centrifugális elfordulást) hoz létre!
-    var brackets = raw_brackets - dims.dt * V_gradient;
+    //var brackets = raw_brackets - dims.dt * V_gradient;
 
     // Végső kemény hardveres védelem, hogy a kerekítési hibák se tudják megütni a videókártyát
-    brackets = clamp(brackets, -1500.0, 1500.0);
+    //brackets = clamp(brackets, -1500.0, 1500.0);
 
     //let lambda = 0.0001; 
     //let saturation_factor = 1.0 / (1.0 + lambda * raw_brackets * raw_brackets);
     //let brackets = raw_brackets * saturation_factor;
-    
-    let scalars = vec4<f32>(R_scalar, K_scalar, C2_scalar, brackets);
-    set_vec1(NEW,address, scalars);
-    
-    let gem_scalars = compute_gravito_electromagnetism(R20_tensor, Rc_tensor, g_past, i_past);
-    set_vec2(NEW, address, gem_scalars);
+    //set_scalar(NEW,address, BRACKETS, brackets);
 
-    var ricci: MetricPoint;
-    ricci[0] = Rc_tensor.R00;
-    ricci[1] = Rc_tensor.R11;
-    ricci[2] = Rc_tensor.R22;
-    ricci[3] = Rc_tensor.R33;
-    ricci[4] = Rc_tensor.R01;
-    ricci[5] = Rc_tensor.R02;
-    ricci[6] = Rc_tensor.R03;
-    ricci[7] = Rc_tensor.R12;
-    ricci[8] = Rc_tensor.R13;
-    ricci[9] = Rc_tensor.R23;
-    set_metric(OLD, address, RICCI, ricci);
-    
+    compute_gravito_electromagnetism(address, R20_tensor, Rc_tensor, g_past, i_past);
+
 }
 // ==========================================
 
 // ==========================================================
 // 4. FÁZIS: IDŐFEJLESZTÉS - ÚJ MOMENTUMOK (Mentés a Jövő momentum helyére)
 // ==========================================================
+//Input:  OLD-METRIC (10 X f32),  OLD-MOMENT (10 X f32), OLD-RICCI (10 X f32),  OLD-ENERGY (10 X f32),  NEW-SCALARS (12 X f32)
+//Output: NEW-METRIC  (10 X f32), NEW-MOMENT (10 X f32)
 @compute @workgroup_size(4, 4, 4)
 fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
     let address = check_idx(coords);
@@ -901,16 +920,54 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
         k_past = get_metric(OLD,address, MOMENT);
     }
     let ricci = get_metric(OLD,address, RICCI);
-    set_metric(NEW,address,RICCI,ricci);  // only for check in CPU
-    let scalars = get_vec1(NEW,address);
-    let brackets = scalars.w;
+    let T_em  = get_metric(OLD,address, ENERGY); // ENERGY_TENSOR slot (A phase3-ból)
+
+    let R_scalar = get_scalar(NEW,address, R_SCALAR);
+    let K_scalar = get_scalar(NEW,address, K_SCALAR);
+    let C2_scalar = get_scalar(NEW,address, C2_SCALAR);
+   
+    var phi = 0.0;
+    // Biztonsági numerikus korlát: ha R nagyon kicsi (pl. sík Minkowski térben), 
+    // a csatolás 0 marad, így nem kapunk nullával való osztást!
+    if (abs(R_scalar) > 1e-6) {
+        phi = 2.0 * (K_scalar + C2_scalar / 3.0) / R_scalar;
+    }
+    // Stabilizáló konformis osztófaktor a tenzortényezők egymásra hatásából
+    let stabilization_factor = 1.0 / (1.0 + phi);
+    set_scalar(NEW,address, BRACKETS, stabilization_factor);
 
     var next_k: MetricPoint;
     var next_g: MetricPoint;
-    // phase4 belső Euler loop frissítése:
+    // EGYSÉGES, TELJES 10-ELEMŰ TENZORIÁLIS IDŐFEJLESZTÉS
     for (var r = 0u; r < 10u; r = r + 1u) {
-        var effective_forcing = brackets * g_past[r] - ricci[r];
-        
+        // Az egyenleted szerinti pontos forrás-tag, ahol a tenzortényezők 
+        // egymásra hatása (stabilization_factor) közvetlenül irányítja a Ricci-t!
+        let source_term = stabilization_factor * (T_em[r] + 0.5 * R_scalar * g_past[r]) - ricci[r];
+        // Euler-időléptetés a momentumra
+        next_k[r] = k_past[r] + dims.dt * source_term;
+        // Kinematikai időléptetés a metrikára
+        next_g[r] = g_past[r] - 2.0 * dims.dt * next_k[r];
+    }
+
+
+
+
+
+
+
+    /*var next_k: MetricPoint;
+    var next_g: MetricPoint;    
+    let brackets = get_scalar(NEW,address, BRACKETS);
+    for (var r = 0u; r < 10u; r = r + 1u) {
+        // AZ EINSTEIN-I HATÁS-ELLENHATÁS BEINDÍTÁSA (+ T_em[r]):
+        // Ha a g12 (r=7) kúszni kezd, az áramlás T12 nyomása pozitív előjellel belép ide, 
+        // és automatikusan elkezdi FÉKEZNI a momentum növekedését, stabilizálva a rendszert!
+        next_k[r] = k_past[r] + dims.dt * (brackets * g_past[r] - ricci[r] + T_em[r]);        
+        next_g[r] = g_past[r] - 2.0 * dims.dt * next_k[r];
+    }*/    
+    // phase4 belső Euler loop frissítése:
+    /*for (var r = 0u; r < 10u; r = r + 1u) {
+        var effective_forcing = brackets * g_past[r] - ricci[r];        
         // MEXIKÓI KALAP CSATOLÁS: Ha a diagonális nyomás (r=0..3) eléri a kritikus szintet, 
         // a túlfolyó energiát matematikailag átcsatornázzuk a kereszt-tagok (r=4..9) momentumába.
         // Ez elindítja a g12, g13, g23 spontán kúszását, teljesen megvédve a diagonálisokat az összeomlástól!
@@ -930,7 +987,7 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
 
         next_k[r] = k_past[r] + dims.dt * effective_forcing;
         next_g[r] = g_past[r] - 2.0 * dims.dt * next_k[r];
-    }
+    }*/
     /*for (var r = 0u; r < 10u; r = r + 1u) {
         // Kiszámítjuk mind a 10 új momentum-komponenst az Euler-szabály szerint
         next_k[r] = k_past[r] + dims.dt * (brackets * g_past[r] - ricci[r]);
@@ -939,8 +996,9 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
     }*/
     set_metric(NEW,address,MOMENT,next_k);
     set_metric(NEW,address,METRIC,next_g);
-    let i_past = get_metric(OLD,address, INVERZ); // only for check in CPU
-    set_metric(NEW,address,INVERZ,i_past);
+    
+    set_metric(NEW,address,INVERZ,T_em); // only for check in CPU
+    set_metric(NEW,address,RICCI,ricci); // only for check in CPU
 
 }
 // ==========================================
@@ -948,15 +1006,14 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
 // ==========================================================
 // 5. FÁZIS: JÖVŐBELI ÁLLAPOT VISSZAMÁSOLÁSA A MÚLTBA (In-place Reset)
 // ==========================================================
+// copy NEW to OLD
 @compute @workgroup_size(4, 4, 4)
 fn phase5(@builtin(global_invocation_id) id: vec3<u32>) {
     // Határellenőrzés a te check_idx függvényeddel
     let address = check_idx(id);
     if (address < 0) { return; }
 
-    // Kézzel kibontott, ultra-gyors unrolled ciklus a 48 elem átmásolására
-    // Így a GPU textúra/puffer betöltő egységei maximális sávszélességgel dolgoznak
-    for (var s = 0; s < 48; s = s + 1) {
+    for (var s = 0; s < 52; s = s + 1) {
         buff_old[address].a[s] = buff_new[address].a[s];
     }
 }
