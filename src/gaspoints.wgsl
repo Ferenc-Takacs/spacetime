@@ -2,7 +2,7 @@ struct GridDimensions {
     width: u32,
     height: u32,
     depth: u32,
-    dxyz: f32,
+    dx: f32,
     dt: f32,
     step_index: u32,
     init_flag: u32,  // (1u = kezdeti inicializáció, 0u = futó szimuláció)
@@ -64,7 +64,7 @@ fn check_idx(id: vec3<u32>) -> i32 {
     return i32(id.x + (id.y + id.z * dims.height) * dims.width);
 }
 
-fn next_(address: i32, dx: i32, dy: i32, dz: i32 ) -> i32 {
+fn next(address: i32, dx: i32, dy: i32, dz: i32 ) -> i32 {
     let w = i32(dims.width);
     let h = i32(dims.height);
     let d = i32(dims.depth);
@@ -75,23 +75,6 @@ fn next_(address: i32, dx: i32, dy: i32, dz: i32 ) -> i32 {
     x = clamp(x + dx, 0, w - 1);
     y = clamp(y + dy, 0, h - 1);
     z = clamp(z + dz, 0, d - 1);
-    return x + (y + z * h) * w;
-}
-
-fn next(address: i32, dx: i32, dy: i32, dz: i32 ) -> i32 {
-    let w = i32(dims.width);
-    let h = i32(dims.height);
-    let d = i32(dims.depth);
-    let a = address / w;
-    var x = address - a * w;
-    var z = a / h;
-    var y = a - z * h;
-    x = x + dx;
-    y = y + dy;
-    z = z + dz;
-    if (x < 0 || x >= w || y < 0 || y >= h || z < 0 || z >= d) {
-        return -1;
-    }
     return x + (y + z * h) * w;
 }
 
@@ -317,13 +300,11 @@ fn invert_metric(p: MetricPoint) -> MetricPoint {
 fn phase1(@builtin(global_invocation_id) coords: vec3<u32>) {
     let address = check_idx(coords);
     if ( address<0 ) { return; }
-    
     let g = get_metric(OLD, address, METRIC);
     let inv = invert_metric(g);
     set_metric(OLD, address, INVERZ, inv);
 }
 // ==========================================
-
 
 fn extract_metric_element(p: MetricPoint, a: u32, b: u32) -> f32 {
     var u = a;
@@ -342,130 +323,29 @@ fn extract_metric_element(p: MetricPoint, a: u32, b: u32) -> f32 {
     return 0.0;
 }
 
-struct Derive {
-    g_center: MetricPoint,
-    g_x_p: MetricPoint,
-    g_x_m: MetricPoint,
-    g_y_p: MetricPoint,
-    g_y_m: MetricPoint,
-    g_z_p: MetricPoint,
-    g_z_m: MetricPoint,
-    d_x: f32,
-    d_y: f32,
-    d_z: f32,
+fn get_deriv(mu: u32, a: u32, b: u32,
+        p_x_plus: MetricPoint, p_x_minus: MetricPoint,
+        p_y_plus: MetricPoint, p_y_minus: MetricPoint,
+        p_z_plus: MetricPoint, p_z_minus: MetricPoint) -> f32 {
+    if (mu == 0u) { return 0.0; }
+    var val_plus = 0.0;
+    var val_minus = 0.0;
+    if (mu == 1u)      { val_plus = extract_metric_element(p_x_plus, a, b); val_minus = extract_metric_element(p_x_minus, a, b); }
+    else if (mu == 2u) { val_plus = extract_metric_element(p_y_plus, a, b); val_minus = extract_metric_element(p_y_minus, a, b); }
+    else if (mu == 3u) { val_plus = extract_metric_element(p_z_plus, a, b); val_minus = extract_metric_element(p_z_minus, a, b); }
+    return (val_plus - val_minus) * 0.5 * dims.dx;
 }
 
-fn get_deriv(mu: u32, a: u32, b: u32, d: Derive) -> f32 {
-    if (mu == 0u) {
-        if (a == 0u && b == 0u) {
-            // 1. LÉPÉS: A g00 elem tiszta térbeli gradiensei (d.d_x tartalmazza a rácssimítást!)
-            let dx_g00 = (extract_metric_element(d.g_x_p, 0u, 0u) - extract_metric_element(d.g_x_m, 0u, 0u)) * d.d_x;
-            let dy_g00 = (extract_metric_element(d.g_y_p, 0u, 0u) - extract_metric_element(d.g_y_m, 0u, 0u)) * d.d_y;
-            let dz_g00 = (extract_metric_element(d.g_z_p, 0u, 0u) - extract_metric_element(d.g_z_m, 0u, 0u)) * d.d_z;
-            // 2. LÉPÉS: A helyi áramlási sebességek (súlyok) kiolvasása a kereszt-komponensekből (g0i)
-            let v_x = extract_metric_element(d.g_center, 0u, 1u); // g01 komponens
-            let v_y = extract_metric_element(d.g_center, 0u, 2u); // g02 komponens
-            let v_z = extract_metric_element(d.g_center, 0u, 3u); // g03 komponens
-            // 3. LÉPÉS: A Folyó-modell szerinti súlyozott konvektív összegzés
-            // A sebességvektorok és gradiensek szorzata másodpercenkénti változást ad ki, amit beszorzunk dims.dt-vel
-            let dt_g00 = (v_x * dx_g00 + v_y * dy_g00 + v_z * dz_g00) * dims.dt;
-            return dt_g00;
-        }
-        return 0.0;
-    }
-    else if (mu == 1u) { return (extract_metric_element(d.g_x_p, a, b) - extract_metric_element(d.g_x_m, a, b)) * d.d_x; }
-    else if (mu == 2u) { return (extract_metric_element(d.g_y_p, a, b) - extract_metric_element(d.g_y_m, a, b)) * d.d_y; }
-    else               { return (extract_metric_element(d.g_z_p, a, b) - extract_metric_element(d.g_z_m, a, b)) * d.d_z; }
-}
 
-fn get_christoffel_at(address: i32, d: i32) -> Christoffel40 {
-    let g_center  = get_metric(OLD,address, METRIC);
+fn get_christoffel_at(address: i32) -> Christoffel40 {
+    let p_center  = get_metric(OLD,address, METRIC);
     let g_inverz  = get_metric(OLD,address, INVERZ);
-    var der: Derive;
-    der.g_center = g_center;
-    let adr_x_p = next(address, d, 0, 0);
-    let adr_x_m = next(address,-d, 0, 0);
-    if( adr_x_p < 0 || adr_x_m < 0 ) {
-        if( adr_x_p < 0 ) {
-            der.g_x_m = get_metric(OLD,adr_x_m, METRIC);
-            if( d == 2 ) {
-                let ad_x_p = next(address, 1, 0, 0);
-                if( ad_x_p < 0 ) { der.g_x_p = g_center; der.d_x = 1.0 / (2.0 * dims.dxyz); }
-                else { der.g_x_p = get_metric(OLD,ad_x_p, METRIC); der.d_x = 1.0 / (3.0 * dims.dxyz); }
-            }
-            else { der.g_x_p = g_center; der.d_x = 1.0 / dims.dxyz; }
-        }
-        else { // adr_x_m < 0
-            der.g_x_p = get_metric(OLD,adr_x_p, METRIC);
-            if( d == 2 ) {
-                let ad_x_m = next(address,-1, 0, 0);
-                if( ad_x_m < 0 ) { der.g_x_m = g_center; der.d_x = 1.0 / (2.0 * dims.dxyz); }
-                else { der.g_x_m = get_metric(OLD,ad_x_m, METRIC); der.d_x = 1.0 / (3.0 * dims.dxyz); }
-            }
-            else { der.g_x_m = g_center; der.d_x = 1.0 / dims.dxyz; }
-        }
-    }
-    else {
-        der.g_x_p = get_metric(OLD,adr_x_p, METRIC);
-        der.g_x_m = get_metric(OLD,adr_x_m, METRIC);
-        der.d_x = 1.0 / (2.0 * f32(d) * dims.dxyz);
-    }
-    
-    let adr_y_p = next(address, 0, d, 0);
-    let adr_y_m = next(address, 0,-d, 0);
-    if( adr_y_p < 0 || adr_y_m < 0 ) {
-        if( adr_y_p < 0 ) {
-            der.g_y_m = get_metric(OLD,adr_y_m, METRIC);
-            if( d == 2 ) {
-                let ad_y_p = next(address, 0, 1, 0);
-                if( ad_y_p < 0 ) { der.g_y_p = g_center; der.d_y = 1.0 / (2.0 * dims.dxyz); }
-                else { der.g_y_p = get_metric(OLD,ad_y_p, METRIC); der.d_y = 1.0 / (3.0 * dims.dxyz); }
-            }
-            else { der.g_y_p = g_center; der.d_y = 1.0 / dims.dxyz; }
-        }
-        else { // adr_y_m < 0
-            der.g_y_p = get_metric(OLD,adr_y_p, METRIC);
-            if( d == 2 ) {
-                let ad_y_m = next(address, 0,-1, 0);
-                if( ad_y_m < 0 ) { der.g_y_m = g_center; der.d_y = 1.0 / (2.0 * dims.dxyz); }
-                else { der.g_y_m = get_metric(OLD,ad_y_m, METRIC); der.d_y = 1.0 / (3.0 * dims.dxyz); }
-            }
-            else { der.g_y_m = g_center; der.d_y = 1.0 / dims.dxyz; }
-        }
-    }
-    else {
-        der.g_y_p = get_metric(OLD,adr_y_p, METRIC);
-        der.g_y_m = get_metric(OLD,adr_y_m, METRIC);
-        der.d_y = 1.0 / (2.0 * f32(d) * dims.dxyz);
-    }
-    
-    let adr_z_p = next(address, 0, 0, d);
-    let adr_z_m = next(address, 0, 0,-d);
-    if( adr_z_p < 0 || adr_z_m < 0 ) {
-        if( adr_z_p < 0 ) {
-            der.g_z_m = get_metric(OLD,adr_z_m, METRIC);
-            if( d == 2 ) {
-                let ad_z_p = next(address, 0, 0, 1);
-                if( ad_z_p < 0 ) { der.g_z_p = g_center; der.d_z = 1.0 / (2.0 * dims.dxyz); }
-                else { der.g_z_p = get_metric(OLD,ad_z_p, METRIC); der.d_z = 1.0 / (3.0 * dims.dxyz); }
-            }
-            else { der.g_z_p = g_center; der.d_z = 1.0 / dims.dxyz; }
-        }
-        else { // adr_z_m < 0
-            der.g_z_p = get_metric(OLD,adr_z_p, METRIC);
-            if( d == 2 ) {
-                let ad_z_m = next(address, 0, 0,-1);
-                if( ad_z_m < 0 ) { der.g_z_m = g_center; der.d_z = 1.0 / (2.0 * dims.dxyz); }
-                else { der.g_z_m = get_metric(OLD,ad_z_m, METRIC); der.d_z = 1.0 / (3.0 * dims.dxyz); }
-            }
-            else { der.g_z_m = g_center; der.d_z = 1.0 / dims.dxyz; }
-        }
-    }
-    else {
-        der.g_z_p = get_metric(OLD,adr_z_p, METRIC);
-        der.g_z_m = get_metric(OLD,adr_z_m, METRIC);
-        der.d_z = 1.0 / (2.0 * f32(d) * dims.dxyz);
-    }
+    let p_x_plus  = get_metric(OLD,next(address, 1, 0, 0), METRIC);
+    let p_x_minus = get_metric(OLD,next(address,-1, 0, 0), METRIC);
+    let p_y_plus  = get_metric(OLD,next(address, 0, 1, 0), METRIC);
+    let p_y_minus = get_metric(OLD,next(address, 0,-1, 0), METRIC);
+    let p_z_plus  = get_metric(OLD,next(address, 0, 0, 1), METRIC);
+    let p_z_minus = get_metric(OLD,next(address, 0, 0,-1), METRIC);
 
     var ch: Christoffel40;
     for (var L = 0u; L < 4u; L++) {
@@ -488,9 +368,9 @@ fn get_christoffel_at(address: i32, d: i32) -> Christoffel40 {
             var val = 0.0;
             for (var sig = 0u; sig < 4u; sig++) {
                 let inv_g_L_sig = extract_metric_element(g_inverz, L, sig);
-                let dM_gNsig = get_deriv(M, N, sig, der);
-                let dN_gMsig = get_deriv(N, M, sig, der);
-                let dsig_gMN = get_deriv(sig, M, N, der);
+                let dM_gNsig = get_deriv(M, N, sig, p_x_plus, p_x_minus, p_y_plus, p_y_minus, p_z_plus, p_z_minus);
+                let dN_gMsig = get_deriv(N, M, sig, p_x_plus, p_x_minus, p_y_plus, p_y_minus, p_z_plus, p_z_minus);
+                let dsig_gMN = get_deriv(sig, M, N, p_x_plus, p_x_minus, p_y_plus, p_y_minus, p_z_plus, p_z_minus);
                 val += 0.5 * inv_g_L_sig * (dM_gNsig + dN_gMsig - dsig_gMN);
             }
             if (k == 0u)      { temp_diag.x = val; }
@@ -540,12 +420,7 @@ fn phase2(@builtin(global_invocation_id) coords: vec3<u32>) {
     let address = check_idx(coords);
     if ( address<0 ) { return; }
 
-    let ch1 = get_christoffel_at(address,1);
-    let ch2 = get_christoffel_at(address,2);
-    var ch: Christoffel40;
-    for (var i = 0u; i < 40u; i++) {
-        ch[i] = (ch1[i] + ch2[i]) * 0.5;
-    }
+    let ch = get_christoffel_at(address);
     store_christoffel_scratchpad(ch, address);
 }
 // ==========================================
@@ -580,12 +455,10 @@ fn deriv_gamma(address: i32, L: u32, M: u32, N: u32, dir: u32) -> f32 {
     else if (dir == 2u) { coords_plus = next(address,0,1,0); coords_minus = next(address,0,-1,0); }
     else if (dir == 3u) { coords_plus = next(address,0,0,1); coords_minus = next(address,0,0,-1); }
 
-    var ch_plus: Christoffel40;
-    var ch_minus: Christoffel40;
-    if (coords_plus >= 0)  { ch_plus  = load_christoffel_scratchpad(coords_plus); }
-    if (coords_minus >= 0) { ch_minus = load_christoffel_scratchpad(coords_minus); }
+    let ch_plus  = load_christoffel_scratchpad(coords_plus);
+    let ch_minus = load_christoffel_scratchpad(coords_minus);
 
-    return (extract_gamma(ch_plus, L, M, N) - extract_gamma(ch_minus, L, M, N)) * 0.5 / dims.dxyz;
+    return (extract_gamma(ch_plus, L, M, N) - extract_gamma(ch_minus, L, M, N)) * 0.5 * dims.dx;
 }
 
 fn get_riemann_element(address: i32, ch: Christoffel40, L: u32, M: u32, N: u32, nu: u32) -> f32 {
@@ -897,9 +770,9 @@ fn compute_gravito_electromagnetism(address: i32, R: Riemann20, Rc: MetricPoint,
 
     // 3. SKALÁR INTENZITÁSOK NÉGYZETÉNEK ÖSSZEGE (Nyommentes tenzorkontrakciók)
     var E_squared = E.E11*E.E11 + E.E22*E.E22 + (E.E11+E.E22)*(E.E11+E.E22) + 2.0*(E.E12*E.E12 + E.E13*E.E13 + E.E23*E.E23);
-    //if ( isInfNan(E_squared) ) { E_squared = E.E11 * 0.5 + E.E22 * 0.5; }
+    if ( isInfNan(E_squared) ) { E_squared = E.E11 * 0.5 + E.E22 * 0.5; }
     var B_squared = B.B11*B.B11 + B.B22*B.B22 + (B.B11+B.B22)*(B.B11+B.B22) + 2.0*(B.B12*B.B12 + B.B13*B.B13 + B.B23*B.B23);
-    //if ( isInfNan(B_squared) ) { B_squared = B.B11 * 0.5 + B.B22 * 0.5; }
+    if ( isInfNan(B_squared) ) { B_squared = B.B11 * 0.5 + B.B22 * 0.5; }
 
     set_scalar(NEW,address, E_11, E.E11);
     set_scalar(NEW,address, E_22, E.E22);
@@ -951,9 +824,9 @@ fn compute_energy_momentum_tensor(g: MetricPoint, k: MetricPoint) -> MetricPoint
     T[8] = rho * u1 * u3 + p * g[8]; // T13
     T[9] = rho * u2 * u3 + p * g[9]; // T23
 
-    //for (var r = 0u; r < 10u; r = r + 1u) {
-    //    if ( isInfNan(T[r]) ) { T[r] = 0.0; }
-    //}
+    for (var r = 0u; r < 10u; r = r + 1u) {
+        if ( isInfNan(T[r]) ) { T[r] = 0.0; }
+    }
     
     return T;
 }
@@ -968,20 +841,14 @@ fn phase3(@builtin(global_invocation_id) coords: vec3<u32>) {
     let address = check_idx(coords);
     if ( address<0 ) { return; }
     
-    let g_past = get_metric(OLD, address, METRIC);
     var k_past: MetricPoint;
     if (dims.init_flag == 1u) {
-        var der: Derive;
-        der.g_center = g_past;
-        der.g_x_p = get_metric(OLD, next_(address, 1, 0, 0), METRIC);
-        der.g_x_m = get_metric(OLD, next_(address,-1, 0, 0), METRIC);
-        der.g_y_p = get_metric(OLD, next_(address, 0, 1, 0), METRIC);
-        der.g_y_m = get_metric(OLD, next_(address, 0,-1, 0), METRIC);
-        der.g_z_p = get_metric(OLD, next_(address, 0, 0, 1), METRIC);
-        der.g_z_m = get_metric(OLD, next_(address, 0, 0,-1), METRIC);
-        der.d_x = 1.0 / (2.0 * dims.dxyz);
-        der.d_y = der.d_x;
-        der.d_z = der.d_x;
+        let g_x_p = get_metric(OLD, next(address, 1, 0, 0), METRIC);
+        let g_x_m = get_metric(OLD, next(address,-1, 0, 0), METRIC);
+        let g_y_p = get_metric(OLD, next(address, 0, 1, 0), METRIC);
+        let g_y_m = get_metric(OLD, next(address, 0,-1, 0), METRIC);
+        let g_z_p = get_metric(OLD, next(address, 0, 0, 1), METRIC);
+        let g_z_m = get_metric(OLD, next(address, 0, 0,-1), METRIC);
     
         // A legelső körben (t=0) a momentumokat a térbeli elcsavarodás deriváltjaiból generáljuk le!
         // Diagonális momentumok kezdetben zérók statikus/forgó egyensúlynál
@@ -989,15 +856,15 @@ fn phase3(@builtin(global_invocation_id) coords: vec3<u32>) {
 
         // A Kerr-Schild elcsavarodási kereszt-tagok numerikus deriválása:
         // k_ij = 0.5 * (d_i g_0j + d_j g_0i) -> a te extract_metric_element függvényedet használva:
-        let d1_g01 = get_deriv(1u, 0u, 1u, der); // M=1, N=(0,1)
-        let d1_g02 = get_deriv(1u, 0u, 2u, der);
-        let d2_g01 = get_deriv(2u, 0u, 1u, der);
-        let d1_g03 = get_deriv(1u, 0u, 3u, der);
-        let d3_g01 = get_deriv(3u, 0u, 1u, der);
-        let d2_g02 = get_deriv(2u, 0u, 2u, der);
-        let d2_g03 = get_deriv(2u, 0u, 3u, der);
-        let d3_g02 = get_deriv(3u, 0u, 2u, der);
-        let d3_g03 = get_deriv(3u, 0u, 3u, der);
+        let d1_g01 = get_deriv(1u, 0u, 1u, g_x_p, g_x_m, g_y_p, g_y_m, g_z_p, g_z_m); // M=1, N=(0,1)
+        let d1_g02 = get_deriv(1u, 0u, 2u, g_x_p, g_x_m, g_y_p, g_y_m, g_z_p, g_z_m);
+        let d2_g01 = get_deriv(2u, 0u, 1u, g_x_p, g_x_m, g_y_p, g_y_m, g_z_p, g_z_m);
+        let d1_g03 = get_deriv(1u, 0u, 3u, g_x_p, g_x_m, g_y_p, g_y_m, g_z_p, g_z_m);
+        let d3_g01 = get_deriv(3u, 0u, 1u, g_x_p, g_x_m, g_y_p, g_y_m, g_z_p, g_z_m);
+        let d2_g02 = get_deriv(2u, 0u, 2u, g_x_p, g_x_m, g_y_p, g_y_m, g_z_p, g_z_m);
+        let d2_g03 = get_deriv(2u, 0u, 3u, g_x_p, g_x_m, g_y_p, g_y_m, g_z_p, g_z_m);
+        let d3_g02 = get_deriv(3u, 0u, 2u, g_x_p, g_x_m, g_y_p, g_y_m, g_z_p, g_z_m);
+        let d3_g03 = get_deriv(3u, 0u, 3u, g_x_p, g_x_m, g_y_p, g_y_m, g_z_p, g_z_m);
 
         k_past[4] = d1_g01;                      // k01 = 0.5 * (d_1 g_01 + d_1 g_01) = d_1 g_01
         k_past[5] = 0.5 * (d1_g02 + d2_g01);     // k02
@@ -1011,6 +878,7 @@ fn phase3(@builtin(global_invocation_id) coords: vec3<u32>) {
         k_past = get_metric(OLD, address, MOMENT);
     }
     
+    let g_past = get_metric(OLD, address, METRIC);
     let i_past = get_metric(OLD, address, INVERZ);    
     let ch_center = load_christoffel_scratchpad(address);
     let T_em = compute_energy_momentum_tensor(g_past, k_past);
@@ -1020,13 +888,13 @@ fn phase3(@builtin(global_invocation_id) coords: vec3<u32>) {
     set_metric(OLD, address, RICCI, Rc_tensor);
     
     var R_scalar  = compute_ricci_scalar(Rc_tensor, i_past);
-    //if ( isInfNan(R_scalar) ) { R_scalar = 0.0; }
+    if ( isInfNan(R_scalar) ) { R_scalar = 0.0; }
     set_scalar(NEW, address, R_SCALAR, R_scalar);
     var K_scalar  = sqrt(compute_kretschmann(R20_tensor));
-    //if ( isInfNan(K_scalar) ) { K_scalar = 0.0; }
+    if ( isInfNan(K_scalar) ) { K_scalar = 0.0; }
     set_scalar(NEW, address, K_SCALAR, K_scalar);
     var C2_scalar = sqrt(compute_weyl_squared(K_scalar, Rc_tensor, i_past, R_scalar));
-    //if ( isInfNan(C2_scalar) ) { C2_scalar = 0.0; }
+    if ( isInfNan(C2_scalar) ) { C2_scalar = 0.0; }
     set_scalar(NEW, address, C2_SCALAR, C2_scalar);
 
     compute_gravito_electromagnetism(address, R20_tensor, Rc_tensor, g_past, i_past); // write to NEW scalars
@@ -1044,26 +912,17 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
     let address = check_idx(coords);
     if ( address<0 ) { return; }
 
+    let w = i32(dims.width); let h = i32(dims.height); let d = i32(dims.depth);
+    let dist_x = min(coords.x, u32(w - 1) - coords.x);
+    let dist_y = min(coords.y, u32(h - 1) - coords.y);
+    let dist_z = min(coords.z, u32(d - 1) - coords.z);
+    let min_wall_dist = min(dist_x, min(dist_y, dist_z));
     var sponge_factor = 1.0;
-    //let w = i32(dims.width); let h = i32(dims.height); let d = i32(dims.depth);
-    //let dist_x = min(coords.x, u32(w - 1) - coords.x);
-    //let dist_y = min(coords.y, u32(h - 1) - coords.y);
-    //let dist_z = min(coords.z, u32(d - 1) - coords.z);
-    //if (dist_x < 4u) {
-    //    sponge_factor = sponge_factor * f32(dist_x) / 4.0; 
-    //}
-    //if (dist_y < 4u) {
-    //    sponge_factor = sponge_factor * f32(dist_y) / 4.0; 
-    //}
-    //if (dist_z < 4u) {
-    //    sponge_factor = sponge_factor * f32(dist_z) / 4.0; 
-    //}
-    //let min_wall_dist = min(dist_x, min(dist_y, dist_z));
-    //// Ha a rácspont a legszélső 6 cellán belül van, fokozatosan elnyeljük az energiát
-    //if (min_wall_dist < 6u) {
-    //    // 0.0 a legszélén (teljes fojtás), 1.0 a belső tiszta zónában
-    //    sponge_factor = f32(min_wall_dist) / 6.0; 
-    //}
+    // Ha a rácspont a legszélső 6 cellán belül van, fokozatosan elnyeljük az energiát
+    if (min_wall_dist < 6u) {
+        // 0.0 a legszélén (teljes fojtás), 1.0 a belső tiszta zónában
+        sponge_factor = f32(min_wall_dist) / 6.0; 
+    }
     let g_past    = get_metric(OLD, address, METRIC);
     let k_past    = get_metric(OLD, address, MOMENT);
     let ricci     = get_metric(OLD, address, RICCI);
@@ -1072,9 +931,16 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
     let R_scalar  = get_scalar(NEW, address, R_SCALAR);
     let K_scalar  = get_scalar(NEW, address, K_SCALAR);
     let C2_scalar = get_scalar(NEW, address, C2_SCALAR);
-    
-    let ell_P_negyzet = 1.0;
-    let phi = 2.0 * ell_P_negyzet * (K_scalar + (1.0 / 3.0) * C2_scalar);
+   
+    var phi = 0.0;
+    // Biztonsági numerikus korlát: ha R nagyon kicsi (pl. sík Minkowski térben), 
+    // a csatolás 0 marad, így nem kapunk nullával való osztást!
+    if (abs(R_scalar) > 1e-8) {
+        phi = 2.0 * (K_scalar + C2_scalar / 3.0) / R_scalar;
+    }
+    /*else {
+        phi = 2.0 * (K_scalar + C2_scalar / 3.0) / 1e-8;
+    }*/
     // Stabilizáló konformis osztófaktor a tenzortényezők egymásra hatásából
     let stabilization_factor = 1.0 / (1.0 + phi);
 
@@ -1091,9 +957,9 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
         let source_term = stabilization_factor * (T_em[r] + 0.5 * R_scalar * g_past[r]) - ricci[r];
         // Euler-időléptetés a momentumra
         var k = k_past[r] + local_dt * source_term * sponge_factor;
-        //if (isInfNan(k)) {
-        //    k = k_past[r];
-        //}
+        if (isInfNan(k)) {
+            k = k_past[r];
+        }
         k_next[r] = k;
         
         // Kinematikai időléptetés a metrikára
@@ -1115,6 +981,91 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
 // ==========================================
 
 // ==========================================================
+// 4. FÁZIS: IDŐFEJLESZTÉS - GÁZMODELL
+// ==========================================================
+
+@compute @workgroup_size(4, 4, 4)
+fn phase4(@builtin(global_invocation_id) id: vec3<u32>) {
+    let address = check_idx(id);
+    if (address < 0) { return; }
+
+    // 1. BEOLVASSUK A JELENLEGI GÁZ-ÁLLAPOTOT A MÚLTBÓL (40..44-es slotok)
+    var W_past = buff_old[address].a[40u]; // sűrűség
+    var Vx =     buff_old[address].a[41u]; // sebesség X
+    var Vy =     buff_old[address].a[42u]; // sebesség Y
+    var Vz =     buff_old[address].a[43u]; // sebesség Z
+
+    // 2. JAVÍTOTT KONTINUUM-LEKÉRDEZÉS (A teljes helybéli momentum-fluxusok deriválása)
+    // Először lefejtjük a közvetlen szomszédok sűrűség- ÉS sebességértékeit a múltból (OLD)
+    let addr_xp = next(address, +1,  0,  0); let addr_xm = next(address, -1,  0,  0);
+    let addr_yp = next(address,  0, +1,  0); let addr_ym = next(address,  0, -1,  0);
+    let addr_zp = next(address,  0,  0, +1); let addr_zm = next(address,  0,  0, -1);
+
+    // X-irányú fluxus-különbség: (W * Vx) a jobb oldalon - (W * Vx) a bal oldalon
+    let flux_x_p = buff_old[addr_xp].a[40u] * buff_old[addr_xp].a[41u];
+    let flux_x_m = buff_old[addr_xm].a[40u] * buff_old[addr_xm].a[41u];
+    let dWV_x_dx  = (flux_x_p - flux_x_m) / (2.0 * dims.dx);
+
+    // Y-irányú fluxus-különbség: (W * Vy) fent - (W * Vy) lent
+    let flux_y_p = buff_old[addr_yp].a[40u] * buff_old[addr_yp].a[42u];
+    let flux_y_m = buff_old[addr_ym].a[40u] * buff_old[addr_ym].a[42u];
+    let dWV_y_dy  = (flux_y_p - flux_y_m) / (2.0 * dims.dx);
+
+    // Z-irányú fluxus-különbség: (W * Vz) elöl - (W * Vz) hátul
+    let flux_z_p = buff_old[addr_zp].a[40u] * buff_old[addr_zp].a[43u];
+    let flux_z_m = buff_old[addr_zm].a[40u] * buff_old[addr_zm].a[43u];
+    let dWV_z_dz  = (flux_z_p - flux_z_m) / (2.0 * dims.dx);
+
+    // A TELJES FIZIKAI DIVERGENCIA (A helybéli sűrűség- és sebességváltozások összege)
+    let div_W = dWV_x_dx + dWV_y_dy + dWV_z_dz;
+
+    // 3. IDŐLÉPÉS (Léptetjük a gázt a te dims.dt időlépéseddel)
+    let W_new = W_past - dims.dt * div_W;
+
+
+    // 4. A MEXIKÓI KALAP NYOMÁS-VISSZACSATOLÁS
+    // Ha a W sűrűség túl nagy a magban (összeomlás), a kalap völgye miatt a P_gas megugrik
+    let W_target = 1.0; // Alapértelmezett egyensúlyi téridő-sűrűség
+    let P_gas = 100.0 * (W_past - W_target) * (W_past - W_target) * (W_past - W_target);
+
+    // A gravitációs feszültség (brackets) befelé rántja a gázt, de a belső nyomás (P_gas) 
+    // centrifugálisan elcsavarja a sebességeket, létrehozva a stabil keringést!
+    let brackets = buff_old[address].a[19u]; // 19: feszültség a phase3-ból
+    let Vx_new = Vx + dims.dt * (brackets * Vx - P_gas * (W_right - W_left));
+    let Vy_new = Vy + dims.dt * (brackets * Vy - P_gas * (W_up - W_down));
+
+    // 5. METRIKA LÉPTETÉSE A GÁZSŰRŰSÉG ALAPJÁN (A konformis visszacsatolás)
+    // Ahelyett, hogy a metrika szabadon elszállna, a téridő-gáz sűrűségével (W_new) 
+    // hajszálpontosan moduláljuk a változását, ami GARANTÁLTAN megállítja a horizont-túlcsordulást!
+    let g_past = get_metric(OLD, address, 0);
+    let k_past = get_metric(OLD, address, 2);
+    let Ricci  = get_metric(OLD, address, 3);
+
+    var next_k: MetricPoint;
+    var next_g: MetricPoint;
+    for (var r = 0u; r < 10u; r = r + 1u) {
+        // A gáznyomás (P_gas) és sűrűség (W_new) közvetlenül kiegyenlíti a tenzorelemek futását!
+        next_k[r] = k_past[r] + dims.dt * (brackets * g_past[r] - Ricci[r] + P_gas * g_past[r]);
+        next_g[r] = g_past[r] - 2.0 * dims.dt * next_k[r] * (1.0 / (max(0.1, W_new)));
+    }
+
+    // MENTÉS A JÖVŐBE (NEW)
+    set_metric(NEW, address, 2, next_k);
+    set_metric(NEW, address, 0, next_g);
+    
+    // Elmentjük a friss gáz-változókat a 40..44-es helyre
+    buff_new[address].a[40u] = W_new;
+    buff_new[address].a[41u] = Vx_new;
+    buff_new[address].a[42u] = Vy_new;
+    buff_new[address].a[43u] = Vz;
+    buff_new[address].a[44u] = P_gas;
+
+    // Átforgatjuk a többi zónát a phase5_copy-hoz
+    for(var s = 10; s < 40; s++) { buff_new[address].a[s] = buff_old[address].a[s]; }
+    for(var s = 45; s < 50; s++) { buff_new[address].a[s] = buff_old[address].a[s]; }
+}
+
+// ==========================================================
 // 5. FÁZIS: JÖVŐBELI ÁLLAPOT VISSZAMÁSOLÁSA A MÚLTBA (In-place Reset)
 // ==========================================================
 // copy NEW to OLD
@@ -1124,12 +1075,12 @@ fn phase5(@builtin(global_invocation_id) id: vec3<u32>) {
     let address = check_idx(id);
     if (address < 0) { return; }
     
-    let adr_x_p = next_(address, 1, 0, 0);
-    let adr_x_m = next_(address,-1, 0, 0);
-    let adr_y_p = next_(address, 0, 1, 0);
-    let adr_y_m = next_(address, 0,-1, 0);
-    let adr_z_p = next_(address, 0, 0, 1);
-    let adr_z_m = next_(address, 0, 0,-1);
+    let adr_x_p = next(address, 1, 0, 0);
+    let adr_x_m = next(address,-1, 0, 0);
+    let adr_y_p = next(address, 0, 1, 0);
+    let adr_y_m = next(address, 0,-1, 0);
+    let adr_z_p = next(address, 0, 0, 1);
+    let adr_z_m = next(address, 0, 0,-1);
     
     let k_past = get_metric(NEW, address, MOMENT);
     let k_x_p  = get_metric(NEW, adr_x_p, MOMENT);
@@ -1140,12 +1091,12 @@ fn phase5(@builtin(global_invocation_id) id: vec3<u32>) {
     let k_z_m  = get_metric(NEW, adr_z_m, MOMENT);
     
     let g_past = get_metric(NEW, address, METRIC);
-    //let g_x_p  = get_metric(NEW, adr_x_p, METRIC);
-    //let g_x_m  = get_metric(NEW, adr_x_m, METRIC);
-    //let g_y_p  = get_metric(NEW, adr_y_p, METRIC);
-    //let g_y_m  = get_metric(NEW, adr_y_m, METRIC);
-    //let g_z_p  = get_metric(NEW, adr_z_p, METRIC);
-    //let g_z_m  = get_metric(NEW, adr_z_m, METRIC);
+    let g_x_p  = get_metric(NEW, adr_x_p, METRIC);
+    let g_x_m  = get_metric(NEW, adr_x_m, METRIC);
+    let g_y_p  = get_metric(NEW, adr_y_p, METRIC);
+    let g_y_m  = get_metric(NEW, adr_y_m, METRIC);
+    let g_z_p  = get_metric(NEW, adr_z_p, METRIC);
+    let g_z_m  = get_metric(NEW, adr_z_m, METRIC);
     
     let alpha = sqrt(max(1e-4, abs(g_past[0])));    
     let local_dt = dims.dt * alpha;
@@ -1158,11 +1109,11 @@ fn phase5(@builtin(global_invocation_id) id: vec3<u32>) {
         k_next[r] = k_past[r] + 0.002 * diff_k;
 
         // Kinematikai időléptetés a metrikára
-        let diff_g = 0.0;//(g_x_p[r] + g_x_m[r] + g_y_p[r] + g_y_m[r] + g_z_p[r] + g_z_m[r]) * (1.0/6.0) - g_past[r];
+        let diff_g = (g_x_p[r] + g_x_m[r] + g_y_p[r] + g_y_m[r] + g_z_p[r] + g_z_m[r]) * (1.0/6.0) - g_past[r];
         var g = g_past[r] - local_dt * k_next[r] + 0.001 * diff_g;
-        //if (isInfNan(g)) {
-        //    g = g_past[r];
-        //}
+        if (isInfNan(g)) {
+            g = g_past[r];
+        }
         g_next[r] = g;
 
     }

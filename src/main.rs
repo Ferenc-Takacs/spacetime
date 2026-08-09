@@ -61,9 +61,11 @@ struct GpuInterface {
     pub buffer_a: wgpu::Buffer,
     #[allow(unused)]
     pub buffer_b: wgpu::Buffer,
-    //pub staging_buffer: wgpu::Buffer,
+    pub staging_buffer: wgpu::Buffer,
     pub device: Arc<wgpu::Device>,
     pub queue: Arc<wgpu::Queue>,
+    pub dims_data: GridDimensions,
+    pub buffer_data: Vec<MetricPoint>,
 }
 
 #[repr(C)]
@@ -81,6 +83,7 @@ struct GridDimensions {
 
 
 impl GpuInterface {
+    
     fn init(render_state: &egui_wgpu::RenderState, app: &SpacetimeApp) -> Option<Self> {
         
         let limits = render_state.adapter.limits();
@@ -160,12 +163,14 @@ impl GpuInterface {
             mapped_at_creation: false,
         });
 
-        //let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        //    label: Some("Staging Buffer"),
-        //    size: io_buffer_size,
-        //    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        //    mapped_at_creation: false,
-        //});
+        let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Staging Buffer"),
+            size: io_buffer_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        
+        let buffer_data = vec![MetricPoint::zeroed(); grid_size as usize];
 
         queue.write_buffer(&buffer_a, 0, bytemuck::cast_slice(&app.grid.data));
 
@@ -232,7 +237,6 @@ impl GpuInterface {
             compilation_options: Default::default(),
             cache: None,
         });
-
         Some(Self{
             io_buffer_size: io_buffer_size,
             compute_pipeline_1: compute_pipeline_1,
@@ -244,27 +248,128 @@ impl GpuInterface {
             dims_buffer: dims_buffer,
             buffer_a: buffer_a,
             buffer_b: buffer_b,
-            //staging_buffer: staging_buffer,
+            staging_buffer: staging_buffer,
             device: device.into(),
             queue: queue.into(),
+            dims_data: app.dims_data,
+            buffer_data: buffer_data,
         })
     }
+    
+    fn copy_dims(&mut self, dims: GridDimensions) {
+        self.dims_data = dims;
+    }
+
+    fn get_dims(&self, dims: & mut GridDimensions) {
+        *dims = self.dims_data.clone();
+    }
+
+    fn get_buffer(&self, grid_data: &mut Vec<MetricPoint>) {
+        *grid_data = self.buffer_data.clone();
+        //println!("{}", self.buffer_data.len());
+    }
+    
+    fn run_one_simulation_step( &mut self) {
+
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Spacetime Command Encoder"),
+        });
+
+        // @compute @workgroup_size(4, 4, 4)
+        let workgroups_x = (self.dims_data.width + 3) / 4;
+        let workgroups_y = (self.dims_data.height + 3) / 4;
+        let workgroups_z = (self.dims_data.depth + 3) / 4;
+        
+        self.queue.write_buffer(&self.dims_buffer, 0, bytemuck::bytes_of(&self.dims_data));
+        
+        {
+            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Spacetime Compute Pass"),
+                timestamp_writes: None,
+            });
+            
+            compute_pass.set_bind_group(0, &self.bind_group, &[]);
+
+            compute_pass.set_pipeline(&self.compute_pipeline_1);
+            compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+
+            compute_pass.set_pipeline(&self.compute_pipeline_2);
+            compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+
+            compute_pass.set_pipeline(&self.compute_pipeline_3);
+            compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+
+            compute_pass.set_pipeline(&self.compute_pipeline_4);                        
+            compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+
+            compute_pass.set_pipeline(&self.compute_pipeline_5);                        
+            compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+            
+            self.dims_data.step_index += 1;
+            if self.dims_data.init_flag != 0 {
+                self.dims_data.init_flag = 0; // Az első időlépés után az inicializáció örökre kikapcsol
+                self.queue.write_buffer(&self.dims_buffer, 0, bytemuck::bytes_of(&self.dims_data));
+            }
+        }
+
+        //let staging_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+        //    label: Some("Staging Buffer"),
+        //    size: self.io_buffer_size,
+        //    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        //    mapped_at_creation: false,
+        //});
+        encoder.copy_buffer_to_buffer( &self.buffer_a, 0, &self.staging_buffer, 0, self.io_buffer_size );
+
+        //self.queue.submit(Some(encoder.finish()));
+        self.queue.submit(std::iter::once(encoder.finish()));
+
+        let total_f32_elements = (self.dims_data.width * self.dims_data.height * self.dims_data.depth) as usize * 52;
+        let mut local_data_copy = vec![0.0f32; total_f32_elements];
+        
+        let buffer_slice = self.staging_buffer.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        buffer_slice.map_async(wgpu::MapMode::Read, move |v| { let _ = sender.send(v);});
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+        if let Ok(Ok(())) = receiver.try_recv() {
+            {
+                let data_view = buffer_slice.get_mapped_range();
+                let result_data: &[f32] = bytemuck::cast_slice(&data_view);
+                local_data_copy.copy_from_slice(result_data);
+                drop(data_view);
+            }
+        }
+        else {
+            println!("Hiba: A GPU nem tudta megfelelően feltérképezni a memóriát!");
+        }
+        self.staging_buffer.unmap();
+
+        let mut src_f32_idx = 0;
+        for p in &mut self.buffer_data {
+            p.data.copy_from_slice(&local_data_copy[src_f32_idx..src_f32_idx + 52]);
+            src_f32_idx += 52;
+        }
+    }
+    
 }
 
 
 struct SpacetimeApp {
     pub grid: SpacetimeGrid,
     pub dims_data: GridDimensions,
-    pub gpu_interface: Option<GpuInterface>,
+    pub gpu_interface: Option<std::sync::Arc<std::sync::Mutex<GpuInterface>>>,
+    pub gpu_receiver: Option<std::sync::mpsc::Receiver<bool>>, // Háttérszál visszajelző csatorna
+    pub gpu_in_progress: bool, // true = épp fut a számítás a háttérben, false = szabad a pálya
 
     pub view_texture: Option<egui::TextureHandle>,
     pub selected_z_slice: i32,
-    slice_only_stats: bool,
+    pub slice_only_stats: bool,
+    pub min_max_frame: usize,
     pub selected_scalar: i32, // 0: R, 1: K, 2: C2, 3: Feszültség
     pub selected_inf: bool,
     pub min_val: f32,
     pub max_val: f32,
     pub is_running_gpu: bool,
+    //pub steps_per_frame: i32,
 
     pub is_recording: bool,
     pub waiting_for_screenshot: bool,
@@ -275,12 +380,12 @@ struct SpacetimeApp {
 
 impl SpacetimeApp {
     fn new() -> Self {
-        let width  = 50;
-        let height = 50;
-        let depth  = 50;
-        let dx: f32 = 0.01;
-        let dt: f32 = dx * 0.0001;
-        let m = 0.5;
+        let width  = 54;
+        let height = 54;
+        let depth  = 54;
+        let dx: f32 = 0.5;
+        let dt: f32 = dx * 0.001;
+        let m = 20.0;
         let r0 = 10.0;
         let grid = SpacetimeGrid::new(width, height, depth, dx, m, r0);
         let dims_data = GridDimensions { width: width, height: height, depth: depth, dx: dx, dt: dt, step_index: 0, init_flag: 1, pad2: 0,};
@@ -288,14 +393,18 @@ impl SpacetimeApp {
             grid,
             dims_data,
             gpu_interface: None,
+            gpu_receiver: None,
+            gpu_in_progress: false,
             view_texture: None,
             selected_z_slice: width as i32/2, // depth/2
             slice_only_stats: true,
-            selected_scalar: 30, // 0: R, 1: K, 2: C2, 3: Feszültség
+            min_max_frame: 0,
+            selected_scalar: 43, // 0: R, 1: K, 2: C2, 3: Feszültség
             selected_inf: false,
             min_val: 0.0,
             max_val: 0.0,
             is_running_gpu: false,
+            //steps_per_frame: 1,
             
             is_recording: false,
             waiting_for_screenshot: false,
@@ -305,94 +414,11 @@ impl SpacetimeApp {
         }
     }
     
-    fn run_one_simulation_step( &mut self) {
-        //println!("Start GPU ...");
-        
-        if let Some(interface) = &self.gpu_interface {
-            let device = &interface.device;
-            let queue = &interface.queue;
-
-            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Spacetime Command Encoder"),
-            });
-
-            // @compute @workgroup_size(4, 4, 4)
-            let workgroups_x = (self.grid.width + 3) / 4;
-            let workgroups_y = (self.grid.height + 3) / 4;
-            let workgroups_z = (self.grid.depth + 3) / 4;
-            
-            {
-                let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("Spacetime Compute Pass"),
-                    timestamp_writes: None,
-                });
-                
-                compute_pass.set_bind_group(0, &interface.bind_group, &[]);
-
-                queue.write_buffer(&interface.dims_buffer, 0, bytemuck::bytes_of(&self.dims_data));
-                
-
-                compute_pass.set_pipeline(&interface.compute_pipeline_1);
-                compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
-
-                compute_pass.set_pipeline(&interface.compute_pipeline_2);
-                compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
-
-                compute_pass.set_pipeline(&interface.compute_pipeline_3);
-                compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
-
-                compute_pass.set_pipeline(&interface.compute_pipeline_4);                        
-                compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
-
-                compute_pass.set_pipeline(&interface.compute_pipeline_5);                        
-                compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
-            }
-            //println!("Stop GPU");
-
-            let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Staging Buffer"),
-                size: interface.io_buffer_size,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            encoder.copy_buffer_to_buffer( &interface.buffer_a, 0, &staging_buffer, 0, interface.io_buffer_size );
-
-            //interface.queue.submit(Some(encoder.finish()));
-            queue.submit(std::iter::once(encoder.finish()));
-
-            let total_f32_elements = (self.grid.width * self.grid.height * self.grid.depth) as usize * 52;
-            let mut local_data_copy = vec![0.0f32; total_f32_elements];
-            
-            let buffer_slice = staging_buffer.slice(..);
-            let (sender, receiver) = std::sync::mpsc::channel();
-            buffer_slice.map_async(wgpu::MapMode::Read, move |v| { let _ = sender.send(v);});
-            let _ = device.poll(wgpu::PollType::wait_indefinitely());
-            if let Ok(Ok(())) = receiver.try_recv() {
-                {
-                    let data_view = buffer_slice.get_mapped_range();
-                    let result_data: &[f32] = bytemuck::cast_slice(&data_view);
-                    local_data_copy.copy_from_slice(result_data);
-                    drop(data_view);
-                }
-            }
-            else {
-                println!("Hiba: A GPU nem tudta megfelelően feltérképezni a memóriát!");
-            }
-            staging_buffer.unmap();
-
-            let mut src_f32_idx = 0;
-            for p in &mut self.grid.data {
-                p.data.copy_from_slice(&local_data_copy[src_f32_idx..src_f32_idx + 52]);
-                src_f32_idx += 52;
-            }
-
-            self.dims_data.step_index += 1;
-            self.dims_data.init_flag = 0; // Az első időlépés után az inicializáció örökre kikapcsol
-            //println!("Result {}",self.dims_data.step_index);
-        }
-    }
     
     fn sclice_statistic( &mut self, ctx: &egui::Context) {
+        if self.grid.data.is_empty()  || self.grid.data.len() == 0 {
+            return; 
+        }
         let width = self.grid.width as usize;
         let height = self.grid.height as usize;
         let depth = self.grid.depth as usize;
@@ -417,11 +443,17 @@ impl SpacetimeApp {
         let scalar_offset = self.selected_scalar as usize;
         self.selected_inf = false;
         let z_slice = self.selected_z_slice as usize;
-        for z in 0..depth {
+        let x_min = self.min_max_frame;
+        let x_max = width-self.min_max_frame;
+        let y_min = self.min_max_frame;
+        let y_max = height-self.min_max_frame;
+        let z_min = self.min_max_frame;
+        let z_max = depth-self.min_max_frame;
+        for z in z_min..z_max {
             // Ha a Checkbox be van jelölve, a külső ciklus átugorja a többi Z-réteget
             if self.slice_only_stats && z != z_slice { continue; }            
-            for y in 0..height {
-                for x in 0..width {
+            for y in y_min..y_max {
+                for x in x_min..x_max {
                     let idx_1d = x + (y * width) + (z * width * height);
                     let val = self.grid.data[idx_1d].data[scalar_offset];
                     if val.is_finite() {
@@ -565,7 +597,7 @@ impl eframe::App for SpacetimeApp {
             }
         }
         
-        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(820.0, 600.0)));
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(814.0, 572.0)));
 
         egui::CentralPanel::default().frame(egui::Frame::NONE.inner_margin(0.0)).show(ctx, |ui| {
 
@@ -573,7 +605,9 @@ impl eframe::App for SpacetimeApp {
                 if let Some(render_state) = frame.wgpu_render_state() {
                     println!("wgpu_render_state state exist, start ...");
                     if let Some(interface) = GpuInterface::init(render_state, &self) {
-                        self.gpu_interface = Some(interface);
+                        self.gpu_interface = Some(Arc::new(std::sync::Mutex::new(interface)));
+                        self.gpu_in_progress = false;
+                        self.gpu_receiver = None;
                         redraw = true;
                         println!("GPU OK");
                     }
@@ -586,10 +620,12 @@ impl eframe::App for SpacetimeApp {
 
             ui.separator();
             // IDŐLÉPÉST VEZÉRLŐ GOMBOK
+            let mut press_once = false;
             ui.horizontal(|ui| {
                 if ui.button("One Step Simulate").clicked() {
-                    self.run_one_simulation_step();
-                    redraw = true;
+                    //self.run_one_simulation_step();
+                    press_once = true;
+                    //redraw = true;
                 }
 
                 // START / STOP GOMB
@@ -598,11 +634,53 @@ impl eframe::App for SpacetimeApp {
                     self.is_running_gpu = !self.is_running_gpu;
                 }
                 // AUTOMATIKUS MEGHÍVÁS: Ha fut a szimuláció, minden frame-en végrehajtunk egy időlépést
-                if self.is_running_gpu {
-                    self.run_one_simulation_step();
-                    self.sclice_statistic(ctx);
+                if self.is_running_gpu || press_once {
+                    if !self.gpu_in_progress {
+                        if let Some(interface_arc) = &self.gpu_interface {                    
+                            self.gpu_in_progress = true; // Zároljuk a felületet az újabb indítások ellen
+                            if let Ok(mut interface) = interface_arc.lock() {
+                                interface.copy_dims(self.dims_data);
+                            }
+                            // Klónozzuk az Arc mutatót a háttérszál számára (ez elképesztően olcsó művelet)
+                            let interface_for_thread = interface_arc.clone();
+                            let ctx_clone = ui.ctx().clone();
+                            // Létrehozzuk az MPSC csatornát az időlépés végének jelzésére
+                            let (tx, rx) = std::sync::mpsc::channel();
+                            self.gpu_receiver = Some(rx);
+                            std::thread::spawn(move || {
+                                if let Ok(mut interface) = interface_for_thread.lock() {
+                                    interface.run_one_simulation_step();
+                                }
+                                let _ = tx.send(true);
+                                ctx_clone.request_repaint();
+                            });
+                        }
+                    }
+                    //self.run_one_simulation_step();
+                    //self.sclice_statistic(ctx);
                     // Kényszerítjük az egui-t, hogy azonnal hívja meg újra a UI-t (folyamatos animáció)
-                    ui.ctx().request_repaint();
+                    //ui.ctx().request_repaint();
+                }
+
+                if let Some(receiver) = &self.gpu_receiver {
+                    // A try_recv() nem-blokkoló: ha a háttérszál még dolgozik, azonnal továbblép, nincs akadás!
+                    if let Ok(true) = receiver.try_recv() {
+                        // Megérkezett a jel! Kivesszük az adatokat az interfészből a te get_buffer függvényeddel
+                        if let Some(interface_arc) = &self.gpu_interface {
+                            if let Ok(interface) = interface_arc.lock() {
+                                interface.get_buffer(&mut self.grid.data);
+                                interface.get_dims(&mut self.dims_data);
+                            }
+                        }
+                        // Azonnal legeneráljuk az új hőtérkép textúrát a frissen beérkezett rácsból
+                        //let ctx_clone = ui.ctx().clone();
+                        self.sclice_statistic(ctx);
+                        redraw = true;
+                        // Felszabadítjuk a rendszert, a következő frame-en indulhat a következő automatikus kör!
+                        self.gpu_in_progress = false;
+                        self.gpu_receiver = None;
+                        //println!("A szimuláció sikeresen beolvasta a {}. időlépést a RAM-ból!", self.dims_data.step_index);
+                    }
                 }
                 
                 if !self.is_running_gpu && ui.button("Save z animation").clicked() {
@@ -632,37 +710,40 @@ impl eframe::App for SpacetimeApp {
                                 .stroke(egui::Stroke::new(1.5, egui::Color32::LIGHT_GRAY))
                                 .show(ui, |ui| {
                                     let image_response = ui.image((texture.id(), egui::vec2(size, size)));
-                                    if !self.is_running_gpu {
-                                        if let Some(hover_pos) = image_response.hover_pos() {
-                                            let rect = image_response.rect;
-                                            let local_x = hover_pos.x - rect.min.x;
-                                            let local_y = hover_pos.y - rect.min.y;
-                                            let width = self.grid.width as usize;
-                                            let height = self.grid.height as usize;
-                                            let depth = self.grid.depth as usize;
-                                            let grid_x = ((local_x / size) * width as f32) as usize;
-                                            let grid_y = ((local_y / size) * height as f32) as usize;
-                                            let grid_z = self.selected_z_slice as usize;
-                                            if grid_x < width && grid_y < height && grid_z < depth {
-                                                let idx_1d = grid_x + (grid_y * width) + (grid_z * width * height);
-                                                let val    = self.grid.data[idx_1d].data[self.selected_scalar as usize];
-                                                #[allow(deprecated)]
-                                                egui::show_tooltip_at(
-                                                    ctx,
-                                                    ui.layer_id(),
-                                                    egui::Id::new("grid_tooltip"),
-                                                    ctx.pointer_latest_pos().unwrap_or(egui::Pos2::ZERO) + egui::vec2(20.0, 20.0),
-                                                    |ui: &mut egui::Ui| {
-                                                    ui.heading(format!("Rácspont: ({}, {}, {})",
-                                                        grid_x as i32-self.grid.width as i32/2,
-                                                        grid_y as i32-self.grid.height as i32/2,
-                                                        grid_z as i32-self.grid.depth as i32/2));
-                                                    ui.separator();
-                                                    ui.label(format!("{}", val));
-                                                });
+                                    //if !self.is_running_gpu {
+                                        if !self.grid.data.is_empty() && self.grid.data.len() != 0 {
+                                            if let Some(hover_pos) = image_response.hover_pos() {
+                                                let rect = image_response.rect;
+                                                let local_x = hover_pos.x - rect.min.x;
+                                                let local_y = hover_pos.y - rect.min.y;
+                                                let width = self.grid.width as usize;
+                                                let height = self.grid.height as usize;
+                                                let depth = self.grid.depth as usize;
+                                                let grid_x = ((local_x / size) * width as f32) as usize;
+                                                let grid_y = ((local_y / size) * height as f32) as usize;
+                                                let grid_z = self.selected_z_slice as usize;
+
+                                                if grid_x < width && grid_y < height && grid_z < depth {
+                                                    let idx_1d = grid_x + (grid_y * width) + (grid_z * width * height);
+                                                    let val    = self.grid.data[idx_1d].data[self.selected_scalar as usize];
+                                                    #[allow(deprecated)]
+                                                    egui::show_tooltip_at(
+                                                        ctx,
+                                                        ui.layer_id(),
+                                                        egui::Id::new("grid_tooltip"),
+                                                        ctx.pointer_latest_pos().unwrap_or(egui::Pos2::ZERO) + egui::vec2(20.0, 20.0),
+                                                        |ui: &mut egui::Ui| {
+                                                        ui.heading(format!("Rácspont: ({}, {}, {})",
+                                                            grid_x as i32-self.grid.width as i32/2,
+                                                            grid_y as i32-self.grid.height as i32/2,
+                                                            grid_z as i32-self.grid.depth as i32/2));
+                                                        ui.separator();
+                                                        ui.label(format!("{}", val));
+                                                    });
+                                                }
                                             }
                                         }
-                                    }
+                                    //}
                                 });
                         } else {
                             ui.colored_label(
@@ -687,29 +768,16 @@ impl eframe::App for SpacetimeApp {
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
                                 ui.label(" Metric:");
-                                if ui.radio_value(&mut self.selected_scalar, 30, "00").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 31, "11").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 32, "22").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 33, "33").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 34, "01").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 35, "02").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 36, "03").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 37, "12").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 38, "13").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 39, "23").changed() { redraw = true; }
-                            });
-                            ui.vertical(|ui| {
-                                ui.label(" Energy:");
-                                if ui.radio_value(&mut self.selected_scalar, 20, "00").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 21, "11").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 22, "22").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 23, "33").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 24, "01").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 25, "02").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 26, "03").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 27, "12").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 28, "13").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 29, "23").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 0, "00").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 1, "11").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 2, "22").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 3, "33").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 4, "01").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 5, "02").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 6, "03").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 7, "12").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 8, "13").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 9, "23").changed() { redraw = true; }
                             });
                             ui.vertical(|ui| {
                                 ui.label(" Moments:");
@@ -725,17 +793,30 @@ impl eframe::App for SpacetimeApp {
                                 if ui.radio_value(&mut self.selected_scalar, 19, "23").changed() { redraw = true; }
                             });
                             ui.vertical(|ui| {
+                                ui.label(" Energy:");
+                                if ui.radio_value(&mut self.selected_scalar, 20, "00").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 21, "11").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 22, "22").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 23, "33").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 24, "01").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 25, "02").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 26, "03").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 27, "12").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 28, "13").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 29, "23").changed() { redraw = true; }
+                            });
+                            ui.vertical(|ui| {
                                 ui.label(" Ricci tenzor:");
-                                if ui.radio_value(&mut self.selected_scalar, 0, "00").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 1, "11").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 2, "22").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 3, "33").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 4, "01").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 5, "02").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 6, "03").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 7, "12").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 8, "13").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 9, "23").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 30, "00").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 31, "11").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 32, "22").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 33, "33").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 34, "01").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 35, "02").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 36, "03").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 37, "12").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 38, "13").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 39, "23").changed() { redraw = true; }
                             });
                         });
                         ui.horizontal(|ui| {
@@ -759,10 +840,22 @@ impl eframe::App for SpacetimeApp {
                             });
                         });
 
-                        if ui.add(egui::Slider::new(&mut self.selected_z_slice, 0..=(self.grid.depth as i32 - 1)).text("Z-tengely szelet")).changed() { redraw = true; }
-                        if ui.checkbox(&mut self.slice_only_stats, "Csak az aktuális szelet min/max").changed() {
-                            redraw = true;
-                        }
+                        ui.scope(|ui| {
+                            ui.style_mut().spacing.slider_width = 240.0; 
+                            if ui.add(egui::Slider::new(&mut self.selected_z_slice, 0..=(self.grid.depth as i32 - 1)).text("Z")).changed() { 
+                                redraw = true; 
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            if ui.checkbox(&mut self.slice_only_stats, "min/max at Z").changed() {
+                                redraw = true;
+                            }
+                            let fmax = (self.grid.depth/6)as usize;
+                            ui.style_mut().spacing.slider_width = 50.0; 
+                            if ui.add(egui::Slider::new(&mut self.min_max_frame, 0..=fmax).text("min/max frame")).changed() { 
+                                redraw = true; 
+                            }
+                        });
                     });
                 });
             });
@@ -805,7 +898,7 @@ impl SpacetimeGrid {
         let cy = self.height as f32 / 2.0;
         let cz = self.depth as f32 / 2.0;
 
-        let a_spin = 0.2; 
+        let a_spin = 0.01; 
 
         for z in 0..self.depth {
             for y in 0..self.height {
@@ -823,16 +916,6 @@ impl SpacetimeGrid {
                     // 1. SZABÁLYOSÍTOTT SCHWARZSCHILD IDŐ-FAKTOR (A te tágulási képleted)
                     let f = 1.0 - (2.0 * self.m * r2) / (r2 * r + self.r0 * self.r0 * self.r0);
                     
-                    // 2. IZOTRÓP TÉRBELI FAKTOR (Nincs nullával való osztás!)
-                    // Sima, folytonos átmenetet biztosít a végtelen távolság (1.0) és a mag között
-                    
-                    /*let psi_factor = 1.0 + (2.0 * self.m) / regularized_r;
-                    // 3. TENZOR ELEMEK BEÍRÁSA (idx = 0..9)
-                    self.data[idx].data[30] = -f;          // g00 (Idő)
-                    self.data[idx].data[31] = psi_factor;  // g11 (X térbeli)
-                    self.data[idx].data[32] = psi_factor;  // g22 (Y térbeli)
-                    self.data[idx].data[33] = psi_factor;  // g33 (Z térbeli)*/
-                    
                     let denom = regularized_r * regularized_r + a_spin * a_spin;
                     let l_0 = 1.0;
                     let l_1 = (regularized_r * rx + a_spin * ry) / denom;
@@ -840,20 +923,20 @@ impl SpacetimeGrid {
                     let l_3 = rz / regularized_r;
 
                     // Diagonális metrika (Minkowski + Kerr-Schild faktor)
-                    self.data[idx].data[30] = -1.0 + f * l_0 * l_0;
-                    self.data[idx].data[31] =  1.0 + f * l_1 * l_1;
-                    self.data[idx].data[32] =  1.0 + f * l_2 * l_2;
-                    self.data[idx].data[33] =  1.0 + f * l_3 * l_3;
+                    self.data[idx].data[0] = -1.0 + f * l_0 * l_0 - 1.0 / denom;
+                    self.data[idx].data[1] =  1.0 + f * l_1 * l_1;
+                    self.data[idx].data[2] =  1.0 + f * l_2 * l_2;
+                    self.data[idx].data[3] =  1.0 + f * l_3 * l_3;
 
                     // BEINDÍTJUK A TÉRIDŐ KERESZT-TAGJAIT (Idő-Tér elcsavarodás)
-                    self.data[idx].data[34] = f * l_0 * l_1; // g01
-                    self.data[idx].data[35] = f * l_0 * l_2; // g02
-                    self.data[idx].data[36] = f * l_0 * l_3; // g03
+                    self.data[idx].data[4] = f * l_0 * l_1; // g01
+                    self.data[idx].data[5] = f * l_0 * l_2; // g02
+                    self.data[idx].data[6] = f * l_0 * l_3; // g03
 
                     // Térbeli elcsavarodások (X-Y, X-Z, Y-Z)
-                    self.data[idx].data[37] = f * l_1 * l_2; // g12
-                    self.data[idx].data[38] = f * l_1 * l_3; // g13
-                    self.data[idx].data[39] = f * l_2 * l_3; // g23
+                    self.data[idx].data[7] = f * l_1 * l_2; // g12
+                    self.data[idx].data[8] = f * l_1 * l_3; // g13
+                    self.data[idx].data[9] = f * l_2 * l_3; // g23
                     
 
                     // Kirajzoláshoz tesztként elmentjük a G feszültség helyére (s[3]) az f faktort
