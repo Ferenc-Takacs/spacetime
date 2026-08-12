@@ -65,7 +65,7 @@ struct GpuInterface {
     pub device: Arc<wgpu::Device>,
     pub queue: Arc<wgpu::Queue>,
     pub dims_data: GridDimensions,
-    pub buffer_data: Vec<MetricPoint>,
+    pub buffer_data: Vec<MetricPoints>,
 }
 
 #[repr(C)]
@@ -77,7 +77,7 @@ struct GridDimensions {
     dx: f32,
     dt: f32,
     step_index: u32,
-    init_flag: u32,
+    pad1: u32,
     pad2: u32,
 }
 
@@ -146,7 +146,7 @@ impl GpuInterface {
         });
 
         let grid_size = (app.grid.width * app.grid.height * app.grid.depth) as u64;
-        let bytes_per_point = 52*4; //std::mem::size_of::<MetricPoint>() as u64; // 52 darab f32 pontonként
+        let bytes_per_point = 52*4; //std::mem::size_of::<MetricPoints>() as u64; // 52 darab f32 pontonként
         let io_buffer_size = grid_size * bytes_per_point;
 
         let buffer_a = device.create_buffer(&wgpu::BufferDescriptor {
@@ -170,7 +170,7 @@ impl GpuInterface {
             mapped_at_creation: false,
         });
         
-        let buffer_data = vec![MetricPoint::zeroed(); grid_size as usize];
+        let buffer_data = vec![MetricPoints::zeroed(); grid_size as usize];
 
         queue.write_buffer(&buffer_a, 0, bytemuck::cast_slice(&app.grid.data));
 
@@ -264,7 +264,7 @@ impl GpuInterface {
         *dims = self.dims_data.clone();
     }
 
-    fn get_buffer(&self, grid_data: &mut Vec<MetricPoint>) {
+    fn get_buffer(&self, grid_data: &mut Vec<MetricPoints>) {
         *grid_data = self.buffer_data.clone();
         //println!("{}", self.buffer_data.len());
     }
@@ -306,10 +306,6 @@ impl GpuInterface {
             compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
             
             self.dims_data.step_index += 1;
-            if self.dims_data.init_flag != 0 {
-                self.dims_data.init_flag = 0; // Az első időlépés után az inicializáció örökre kikapcsol
-                self.queue.write_buffer(&self.dims_buffer, 0, bytemuck::bytes_of(&self.dims_data));
-            }
         }
 
         //let staging_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -385,10 +381,10 @@ impl SpacetimeApp {
         let depth  = 54;
         let dx: f32 = 0.5;
         let dt: f32 = dx * 0.001;
-        let m = 20.0;
+        let m = 2.0;
         let r0 = 10.0;
-        let grid = SpacetimeGrid::new(width, height, depth, dx, m, r0);
-        let dims_data = GridDimensions { width: width, height: height, depth: depth, dx: dx, dt: dt, step_index: 0, init_flag: 1, pad2: 0,};
+        let grid = SpacetimeGrid::new(width, height, depth, dx, dt, m, r0);
+        let dims_data = GridDimensions { width: width, height: height, depth: depth, dx: dx, dt: dt, step_index: 0, pad1: 0, pad2: 0,};
         Self {
             grid,
             dims_data,
@@ -682,6 +678,45 @@ impl eframe::App for SpacetimeApp {
                         //println!("A szimuláció sikeresen beolvasta a {}. időlépést a RAM-ból!", self.dims_data.step_index);
                     }
                 }
+                if !self.is_running_gpu && ui.button("Save data (csv)").clicked() {
+                    use std::fs::File;
+                    use std::io::{Write, BufWriter};
+
+                    let width = self.grid.width as i32;
+                    let height = self.grid.height as i32;
+                    let depth = self.grid.depth as i32;
+                    let filename = format!(
+                        "data_i{}_dx{:.4}_m{}_r{}.csv",
+                        self.dims_data.step_index, self.dims_data.dx, self.grid.m, self.grid.r0
+                    );
+                    if let Ok(file) = File::create(&filename) {
+                        let mut writer = BufWriter::new(file);
+                        let head = "x,y,z,g00,g11,g22,g33,g01,g02,g03,g12,g13,g23,k00,k11,k22,k33,k01,k02,k03,k12,k13,k23,T00,T11,T22,T33,T01,T02,T03,T12,T13,T23,R00,R11,R22,R33,R01,R02,R03,R12,R13,R23,R,K,C2,Lambda,E11,E22,E12,|E|,B11,B22,B12,|B|\n";
+                        let _ = writer.write_all(head.as_bytes());
+                        for z in 0..self.grid.depth {
+                            for y in 0..self.grid.height {
+                                for x in 0..self.grid.width {
+                                    let idx_1d = (x + (y * self.grid.width) + (z * self.grid.width * self.grid.height)) as usize;
+                                    let gr = &self.grid.data[idx_1d];
+                                    let cx = x as i32 - width / 2;
+                                    let cy = y as i32 - height / 2;
+                                    let cz = z as i32 - depth / 2;
+                                    let mut row_string = format!("{},{},{},", cx, cy, cz);
+                                    for i in 0..52 {
+                                        if i == 51 {
+                                            row_string += &format!("{}\n", gr.data[i]);
+                                        } else {
+                                            row_string += &format!("{},", gr.data[i]);
+                                        }
+                                    }
+                                    let _ = writer.write_all(row_string.as_bytes());
+                                }
+                            }
+                        }
+                        let _ = writer.flush();
+                        println!("A szimulációs adatok sikeresen kimentve a '{}' fájlba!", filename);
+                    }
+                }
                 
                 if !self.is_running_gpu && ui.button("Save z animation").clicked() {
                     self.anim = Vec::new();
@@ -869,7 +904,7 @@ impl eframe::App for SpacetimeApp {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 #[warn(unused)]
-pub struct MetricPoint {
+pub struct MetricPoints {
     pub data: [f32; 52],
 }
 
@@ -879,17 +914,18 @@ pub struct SpacetimeGrid {
     pub height: u32,
     pub depth: u32,
     pub dx: f32,
+    pub dt: f32,
     pub m: f32,
     pub r0: f32,
-    pub data: Vec<MetricPoint>,
+    pub data: Vec<MetricPoints>,
 }
 
 impl SpacetimeGrid {
     // Kényelmi függvény a rács létrehozásához üres adatokkal
-    pub fn new(width: u32, height: u32, depth: u32, dx: f32, m: f32, r0: f32) -> Self {
+    pub fn new(width: u32, height: u32, depth: u32, dx: f32, dt: f32, m: f32, r0: f32) -> Self {
         let size = (width * height * depth) as usize;
-        let data = vec![MetricPoint::zeroed(); size]; // nullára inicializálunk!!!
-        let mut grid =  SpacetimeGrid{ width, height, depth, dx, m, r0, data };
+        let data = vec![MetricPoints::zeroed(); size]; // nullára inicializálunk!!!
+        let mut grid =  SpacetimeGrid{ width, height, depth, dx, dt, m, r0, data };
         grid.one_static_schwarzschild(); // Tesztadatok feltöltése
         grid
     }
@@ -905,7 +941,6 @@ impl SpacetimeGrid {
                 for x in 0..self.width {
                     let idx = (x + y * self.width + z * self.width * self.height) as usize;
 
-                    // Tűpontos fizikai koordináták a rács abszolút közepéhez képest
                     let rx = (x as f32 - cx) * self.dx;
                     let ry = (y as f32 - cy) * self.dx;
                     let rz = (z as f32 - cz) * self.dx;
@@ -937,14 +972,157 @@ impl SpacetimeGrid {
                     self.data[idx].data[7] = f * l_1 * l_2; // g12
                     self.data[idx].data[8] = f * l_1 * l_3; // g13
                     self.data[idx].data[9] = f * l_2 * l_3; // g23
-                    
 
                     // Kirajzoláshoz tesztként elmentjük a G feszültség helyére (s[3]) az f faktort
-                    self.data[idx].data[43] = f; 
+                    self.data[idx].data[43] = f;
+
                 }
             }
         }
+        self.calculate_moments();
         println!("Az Izotróp nemszinguláris Schwarzschild mező sikeresen generálva!");
+    }
+
+    fn extract_metric_element(p: &Metricpoint, a: u32, b: u32) -> f32 {
+        let mut u = a;
+        let mut v = b;
+        if a > b { u = b; v = a; }
+        if u == 0 && v == 0 { return p.d[0]; }
+        if u == 1 && v == 1 { return p.d[1]; }
+        if u == 2 && v == 2 { return p.d[2]; }
+        if u == 3 && v == 3 { return p.d[3]; }
+        if u == 0 && v == 1 { return p.d[4]; }
+        if u == 0 && v == 2 { return p.d[5]; }
+        if u == 0 && v == 3 { return p.d[6]; }
+        if u == 1 && v == 2 { return p.d[7]; }
+        if u == 1 && v == 3 { return p.d[8]; }
+        if u == 2 && v == 3 { return p.d[9]; }
+        return 0.0;
+    }
+
+    fn get_deriv(&self, mu: u32, a: u32, b: u32, d: &Derive) -> f32 {
+        if mu == 0 {
+            if a == 0 && b == 0 {
+                let dx_g00 = (Self::extract_metric_element(&d.g_x_p, 0, 0) - Self::extract_metric_element(&d.g_x_m, 0, 0)) * d.d_x;
+                let dy_g00 = (Self::extract_metric_element(&d.g_y_p, 0, 0) - Self::extract_metric_element(&d.g_y_m, 0, 0)) * d.d_y;
+                let dz_g00 = (Self::extract_metric_element(&d.g_z_p, 0, 0) - Self::extract_metric_element(&d.g_z_m, 0, 0)) * d.d_z;
+                let v_x = Self::extract_metric_element(&d.g_center, 0, 1); // g01 komponens
+                let v_y = Self::extract_metric_element(&d.g_center, 0, 2); // g02 komponens
+                let v_z = Self::extract_metric_element(&d.g_center, 0, 3); // g03 komponens
+                let dt_g00 = (v_x * dx_g00 + v_y * dy_g00 + v_z * dz_g00) * d.d_t;
+                return dt_g00;
+            }
+            return 0.0;
+        }
+        else if mu == 1 { return (Self::extract_metric_element(&d.g_x_p, a, b) - Self::extract_metric_element(&d.g_x_m, a, b)) * d.d_x; }
+        else if mu == 2 { return (Self::extract_metric_element(&d.g_y_p, a, b) - Self::extract_metric_element(&d.g_y_m, a, b)) * d.d_y; }
+        else            { return (Self::extract_metric_element(&d.g_z_p, a, b) - Self::extract_metric_element(&d.g_z_m, a, b)) * d.d_z; }
+    }
+
+    fn get_metric(&self, x: u32, y: u32, z: u32) -> Metricpoint {
+        let x_ = x.clamp(0, self.width - 1);
+        let y_ = y.clamp(0, self.height - 1);
+        let z_ = z.clamp(0, self.depth - 1);
+        let idx = (x_ + y_ * self.width + z_ * self.width * self.height) as usize;
+        let mets =  self.data[idx];
+        let mut met = Metricpoint{ d: [0.0; 10], };
+        for i in 0..10 {
+            met.d[i] = mets.data[i];
+        }
+        return met;
+    }
+
+    fn set_metric(&mut self, x: u32,y: u32,z: u32, met: &Metricpoint, offs: usize) {
+        let idx = (x + y * self.width + z * self.width * self.height) as usize;
+        let mut mets = self.data[idx];
+        for i in 0..10 {
+            mets.data[i+offs] = met.d[i];
+        }
+        self.data[idx] = mets;
+    }
+
+    pub fn calculate_moments(&mut self) {
+
+        for z in 0..self.depth {
+            for y in 0..self.height {
+                for x in 0..self.width {
+
+                    let mut der = Derive::new();
+                    der.g_center = self.get_metric(x,y,z);
+                    der.g_x_p = self.get_metric(x+1,y  ,z  );
+                    der.g_x_m = self.get_metric(x-1,y  ,z  );
+                    der.g_y_p = self.get_metric(x  ,y+1,z  );
+                    der.g_y_m = self.get_metric(x  ,y-1,z  );
+                    der.g_z_p = self.get_metric(x  ,y  ,z+1);
+                    der.g_z_m = self.get_metric(x  ,y  ,z-1);
+                    der.d_x = 1.0 / (2.0 * self.dx);
+                    der.d_y = der.d_x;
+                    der.d_z = der.d_x;
+                    der.d_t = self.dt;
+                    // A legelső körben (t=0) a momentumokat a térbeli elcsavarodás deriváltjaiból generáljuk le!
+                    // Diagonális momentumok kezdetben zérók statikus/forgó egyensúlynál
+                    let mut k_past = Metricpoint{ d: [0.0; 10], };
+                    k_past.d[0] = 0.0; k_past.d[1] = 0.0; k_past.d[2] = 0.0; k_past.d[3] = 0.0;
+                    // A Kerr-Schild elcsavarodási kereszt-tagok numerikus deriválása:
+                    // k_ij = 0.5 * (d_i g_0j + d_j g_0i) -> a te extract_metric_element függvényedet használva:
+                    let d1_g01 = self.get_deriv(1, 0, 1, &der); // M=1, N=(0,1)
+                    let d1_g02 = self.get_deriv(1, 0, 2, &der);
+                    let d2_g01 = self.get_deriv(2, 0, 1, &der);
+                    let d1_g03 = self.get_deriv(1, 0, 3, &der);
+                    let d3_g01 = self.get_deriv(3, 0, 1, &der);
+                    let d2_g02 = self.get_deriv(2, 0, 2, &der);
+                    let d2_g03 = self.get_deriv(2, 0, 3, &der);
+                    let d3_g02 = self.get_deriv(3, 0, 2, &der);
+                    let d3_g03 = self.get_deriv(3, 0, 3, &der);
+                    k_past.d[4] = d1_g01;                      // k01 = 0.5 * (d_1 g_01 + d_1 g_01) = d_1 g_01
+                    k_past.d[5] = 0.5 * (d1_g02 + d2_g01);     // k02
+                    k_past.d[6] = 0.5 * (d1_g03 + d3_g01);     // k03
+                    k_past.d[7] = d2_g02;                      // k12 = d_2 g_02
+                    k_past.d[8] = 0.5 * (d2_g03 + d3_g02);     // k13
+                    k_past.d[9] = d3_g03;                      // k23 = d_3 g_03
+                    self.set_metric(x,y,z, &k_past, 10);
+
+                }
+            }
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+#[warn(unused)]
+pub struct Metricpoint {
+    pub d: [f32; 10],
+}
+
+struct Derive {
+    g_center: Metricpoint,
+    g_x_p:    Metricpoint,
+    g_x_m:    Metricpoint,
+    g_y_p:    Metricpoint,
+    g_y_m:    Metricpoint,
+    g_z_p:    Metricpoint,
+    g_z_m:    Metricpoint,
+    d_x:      f32,
+    d_y:      f32,
+    d_z:      f32,
+    d_t:      f32,
+}
+impl Derive {
+    fn new() -> Self {
+        Self {
+            g_center: Metricpoint{ d: [0.0; 10],},
+            g_x_p:    Metricpoint{ d: [0.0; 10],},
+            g_x_m:    Metricpoint{ d: [0.0; 10],},
+            g_y_p:    Metricpoint{ d: [0.0; 10],},
+            g_y_m:    Metricpoint{ d: [0.0; 10],},
+            g_z_p:    Metricpoint{ d: [0.0; 10],},
+            g_z_m:    Metricpoint{ d: [0.0; 10],},
+            d_x:      0.0,
+            d_y:      0.0,
+            d_z:      0.0,
+            d_t:      0.0,
+       }
     }
 }
 

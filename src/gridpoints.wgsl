@@ -5,7 +5,7 @@ struct GridDimensions {
     dxyz: f32,
     dt: f32,
     step_index: u32,
-    init_flag: u32,  // (1u = kezdeti inicializáció, 0u = futó szimuláció)
+    pad1: u32,
     pad2: u32,
 }
 
@@ -969,49 +969,9 @@ fn phase3(@builtin(global_invocation_id) coords: vec3<u32>) {
     if ( address<0 ) { return; }
     
     let g_past = get_metric(OLD, address, METRIC);
-    var k_past: MetricPoint;
-    if (dims.init_flag == 1u) {
-        var der: Derive;
-        der.g_center = g_past;
-        der.g_x_p = get_metric(OLD, next_(address, 1, 0, 0), METRIC);
-        der.g_x_m = get_metric(OLD, next_(address,-1, 0, 0), METRIC);
-        der.g_y_p = get_metric(OLD, next_(address, 0, 1, 0), METRIC);
-        der.g_y_m = get_metric(OLD, next_(address, 0,-1, 0), METRIC);
-        der.g_z_p = get_metric(OLD, next_(address, 0, 0, 1), METRIC);
-        der.g_z_m = get_metric(OLD, next_(address, 0, 0,-1), METRIC);
-        der.d_x = 1.0 / (2.0 * dims.dxyz);
-        der.d_y = der.d_x;
-        der.d_z = der.d_x;
+    let k_past = get_metric(OLD, address, MOMENT);
     
-        // A legelső körben (t=0) a momentumokat a térbeli elcsavarodás deriváltjaiból generáljuk le!
-        // Diagonális momentumok kezdetben zérók statikus/forgó egyensúlynál
-        k_past[0] = 0.0; k_past[1] = 0.0; k_past[2] = 0.0; k_past[3] = 0.0;
-
-        // A Kerr-Schild elcsavarodási kereszt-tagok numerikus deriválása:
-        // k_ij = 0.5 * (d_i g_0j + d_j g_0i) -> a te extract_metric_element függvényedet használva:
-        let d1_g01 = get_deriv(1u, 0u, 1u, der); // M=1, N=(0,1)
-        let d1_g02 = get_deriv(1u, 0u, 2u, der);
-        let d2_g01 = get_deriv(2u, 0u, 1u, der);
-        let d1_g03 = get_deriv(1u, 0u, 3u, der);
-        let d3_g01 = get_deriv(3u, 0u, 1u, der);
-        let d2_g02 = get_deriv(2u, 0u, 2u, der);
-        let d2_g03 = get_deriv(2u, 0u, 3u, der);
-        let d3_g02 = get_deriv(3u, 0u, 2u, der);
-        let d3_g03 = get_deriv(3u, 0u, 3u, der);
-
-        k_past[4] = d1_g01;                      // k01 = 0.5 * (d_1 g_01 + d_1 g_01) = d_1 g_01
-        k_past[5] = 0.5 * (d1_g02 + d2_g01);     // k02
-        k_past[6] = 0.5 * (d1_g03 + d3_g01);     // k03
-        k_past[7] = d2_g02;                      // k12 = d_2 g_02
-        k_past[8] = 0.5 * (d2_g03 + d3_g02);     // k13
-        k_past[9] = d3_g03;                      // k23 = d_3 g_03
-        set_metric(OLD, address, MOMENT, k_past);
-    } else {
-        // Ha a szimuláció már fut (init_flag == 0u), a momentumokat normálisan a múltból olvassuk be!
-        k_past = get_metric(OLD, address, MOMENT);
-    }
-    
-    let i_past = get_metric(OLD, address, INVERZ);    
+    let i_past = get_metric(OLD, address, INVERZ);
     let ch_center = load_christoffel_scratchpad(address);
     let T_em = compute_energy_momentum_tensor(g_past, k_past);
     set_metric(OLD, address, ENERGY, T_em);    
@@ -1045,21 +1005,22 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
     if ( address<0 ) { return; }
 
     var sponge_factor = 1.0;
-    //let w = i32(dims.width); let h = i32(dims.height); let d = i32(dims.depth);
-    //let dist_x = min(coords.x, u32(w - 1) - coords.x);
-    //let dist_y = min(coords.y, u32(h - 1) - coords.y);
-    //let dist_z = min(coords.z, u32(d - 1) - coords.z);
-    //if (dist_x < 4u) {
-    //    sponge_factor = sponge_factor * f32(dist_x) / 4.0; 
-    //}
-    //if (dist_y < 4u) {
-    //    sponge_factor = sponge_factor * f32(dist_y) / 4.0; 
-    //}
-    //if (dist_z < 4u) {
-    //    sponge_factor = sponge_factor * f32(dist_z) / 4.0; 
-    //}
-    //let min_wall_dist = min(dist_x, min(dist_y, dist_z));
-    //// Ha a rácspont a legszélső 6 cellán belül van, fokozatosan elnyeljük az energiát
+    let sponge_len = 3u;
+    let w = i32(dims.width); let h = i32(dims.height); let d = i32(dims.depth);
+    let dist_x = min(coords.x, u32(w - 1) - coords.x);
+    let dist_y = min(coords.y, u32(h - 1) - coords.y);
+    let dist_z = min(coords.z, u32(d - 1) - coords.z);
+    if (dist_x < sponge_len) {
+        sponge_factor = sponge_factor * f32(dist_x) / f32(sponge_len); 
+    }
+    if (dist_y < sponge_len) {
+        sponge_factor = sponge_factor * f32(dist_y) / f32(sponge_len); 
+    }
+    if (dist_z < sponge_len) {
+        sponge_factor = sponge_factor * f32(dist_z) / f32(sponge_len); 
+    }
+    let min_wall_dist = min(dist_x, min(dist_y, dist_z));
+    // Ha a rácspont a legszélső 6 cellán belül van, fokozatosan elnyeljük az energiát
     //if (min_wall_dist < 6u) {
     //    // 0.0 a legszélén (teljes fojtás), 1.0 a belső tiszta zónában
     //    sponge_factor = f32(min_wall_dist) / 6.0; 
@@ -1085,12 +1046,33 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
     var k_next: MetricPoint;
     //var g_next: MetricPoint;
     // EGYSÉGES, TELJES 10-ELEMŰ TENZORIÁLIS IDŐFEJLESZTÉS
-    for (var r = 0u; r < 10u; r = r + 1u) {
+    // EGYSÉGES, TELJES 10-ELEMŰ TENZORIÁLIS IDŐFEJLESZTÉS
+    for (var r = 0u; r < 10u; r = r + 1u) {        
+        // 1. LÉPÉS: A komplementer feszültség-kapcsoló kiszámítása pontról pontra.
+        // Ha az adott irányban (pl. ricci[r]) már túl nagy a feszültség, ez a tag 
+        // lefojtja azt, és a megmaradó energiát átirányítja a szabad, nulla értékű helyekre!
+        let complementer_tension = g_past[r] * R_scalar - ricci[r];
+        // 2. LÉPÉS: Az anizotróp tértágulási forrás (phi) helyi, irányított felépítése
+        // A gamma=2 és delta=2/3 kétlépcsős kalibráció, szorozva a Planck-négyzettel (ami itt 1.0)
+        let local_phi = 2.0 * K_scalar + (2.0 / 3.0) * C2_scalar;        
+        // 3. LÉPÉS: A javított, golyóálló Forrás-tag felírása
+        // A lambda-tag most már nem szorozza vakon a meglévő csúcsot, hanem az 
+        // új complementer_tension operátoron keresztül a szabad irányokat pumpálja!
+        let source_term = T_em[r] + local_phi * complementer_tension - ricci[r];
+        // Euler-időléptetés a momentumra
+        var k = (k_past[r] + local_dt * source_term) * sponge_factor;
+        // Túlcsordulás és NaN elleni szoftveres védőgát feloldása
+        //if (isInfNan(k)) {
+        //    k = k_past[r] * 0.5; // Ha instabillá válna, finoman visszahúzzuk a rácsot
+        //}
+        k_next[r] = k;
+    }
+    /*for (var r = 0u; r < 10u; r = r + 1u) {
         // Az egyenleted szerinti pontos forrás-tag, ahol a tenzortényezők 
         // egymásra hatása (stabilization_factor) közvetlenül irányítja a Ricci-t!
         let source_term = stabilization_factor * (T_em[r] + 0.5 * R_scalar * g_past[r]) - ricci[r];
         // Euler-időléptetés a momentumra
-        var k = k_past[r] + local_dt * source_term * sponge_factor;
+        var k = (k_past[r] + local_dt * source_term) * sponge_factor;
         //if (isInfNan(k)) {
         //    k = k_past[r];
         //}
@@ -1101,7 +1083,7 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
         //let diff = (p_x_p[r] + p_x_m[r] + p_y_p[r] + p_y_m[r] + p_z_p[r] + p_z_m[r]) * (1.0/6.0) - g_past[r];
         //g_next[r] = g_next[r] + 0.003 * diff;
 
-    }
+    }*/
 
 
     set_metric(NEW, address, MOMENT, k_next);
@@ -1140,12 +1122,12 @@ fn phase5(@builtin(global_invocation_id) id: vec3<u32>) {
     let k_z_m  = get_metric(NEW, adr_z_m, MOMENT);
     
     let g_past = get_metric(NEW, address, METRIC);
-    //let g_x_p  = get_metric(NEW, adr_x_p, METRIC);
-    //let g_x_m  = get_metric(NEW, adr_x_m, METRIC);
-    //let g_y_p  = get_metric(NEW, adr_y_p, METRIC);
-    //let g_y_m  = get_metric(NEW, adr_y_m, METRIC);
-    //let g_z_p  = get_metric(NEW, adr_z_p, METRIC);
-    //let g_z_m  = get_metric(NEW, adr_z_m, METRIC);
+    let g_x_p  = get_metric(NEW, adr_x_p, METRIC);
+    let g_x_m  = get_metric(NEW, adr_x_m, METRIC);
+    let g_y_p  = get_metric(NEW, adr_y_p, METRIC);
+    let g_y_m  = get_metric(NEW, adr_y_m, METRIC);
+    let g_z_p  = get_metric(NEW, adr_z_p, METRIC);
+    let g_z_m  = get_metric(NEW, adr_z_m, METRIC);
     
     let alpha = sqrt(max(1e-4, abs(g_past[0])));    
     let local_dt = dims.dt * alpha;
@@ -1158,7 +1140,7 @@ fn phase5(@builtin(global_invocation_id) id: vec3<u32>) {
         k_next[r] = k_past[r] + 0.002 * diff_k;
 
         // Kinematikai időléptetés a metrikára
-        let diff_g = 0.0;//(g_x_p[r] + g_x_m[r] + g_y_p[r] + g_y_m[r] + g_z_p[r] + g_z_m[r]) * (1.0/6.0) - g_past[r];
+        let diff_g = (g_x_p[r] + g_x_m[r] + g_y_p[r] + g_y_m[r] + g_z_p[r] + g_z_m[r]) * (1.0/6.0) - g_past[r];
         var g = g_past[r] - local_dt * k_next[r] + 0.001 * diff_g;
         //if (isInfNan(g)) {
         //    g = g_past[r];
