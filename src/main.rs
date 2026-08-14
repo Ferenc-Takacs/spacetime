@@ -268,6 +268,11 @@ impl GpuInterface {
         *grid_data = self.buffer_data.clone();
         //println!("{}", self.buffer_data.len());
     }
+
+    fn write_buffer(&mut self, grid_data: &Vec<MetricPoints>) {
+        self.buffer_data = grid_data.clone();
+        self.queue.write_buffer(&self.buffer_a, 0, bytemuck::cast_slice(&self.buffer_data));
+    }
     
     fn run_one_simulation_step( &mut self) {
 
@@ -381,7 +386,7 @@ impl SpacetimeApp {
         let depth  = 54;
         let dx: f32 = 0.5;
         let dt: f32 = dx * 0.001;
-        let m = 2.0;
+        let m = 1.6;
         let r0 = 10.0;
         let grid = SpacetimeGrid::new(width, height, depth, dx, dt, m, r0);
         let dims_data = GridDimensions { width: width, height: height, depth: depth, dx: dx, dt: dt, step_index: 0, pad1: 0, pad2: 0,};
@@ -652,10 +657,6 @@ impl eframe::App for SpacetimeApp {
                             });
                         }
                     }
-                    //self.run_one_simulation_step();
-                    //self.sclice_statistic(ctx);
-                    // Kényszerítjük az egui-t, hogy azonnal hívja meg újra a UI-t (folyamatos animáció)
-                    //ui.ctx().request_repaint();
                 }
 
                 if let Some(receiver) = &self.gpu_receiver {
@@ -678,6 +679,7 @@ impl eframe::App for SpacetimeApp {
                         //println!("A szimuláció sikeresen beolvasta a {}. időlépést a RAM-ból!", self.dims_data.step_index);
                     }
                 }
+                
                 if !self.is_running_gpu && ui.button("Save data (csv)").clicked() {
                     use std::fs::File;
                     use std::io::{Write, BufWriter};
@@ -715,6 +717,74 @@ impl eframe::App for SpacetimeApp {
                         }
                         let _ = writer.flush();
                         println!("A szimulációs adatok sikeresen kimentve a '{}' fájlba!", filename);
+                    }
+                }
+                
+                if !self.is_running_gpu && ui.button("Load data (csv)").clicked() {
+                    use std::fs::File;
+                    use std::io::{BufRead, BufReader};
+                    let mut ok = true;
+                    let dialog = rfd::FileDialog::new()
+                        .set_title("Open CSV File ...")
+                        .add_filter("csv", &["csv"]);
+                    if let Some(filename) = dialog.pick_file() {
+                        if let Ok(file) = File::open(&filename) {
+                            if let Some(name) = filename.file_stem().and_then(|s| s.to_str()) {                                
+                                let np: Vec<&str> = name.split('_').collect();
+                                if np.len() >= 5 && np[1].starts_with('i') && np[2].starts_with("dx") &&
+                                  np[3].starts_with('m') && np[4].starts_with('r') {
+                                    if let Ok(val) = np[1][1..].parse::<u32>() { self.dims_data.step_index = val; } else { ok = false; }
+                                    if let Ok(val) = np[2][2..].parse::<f32>() { self.dims_data.dx = val; } else { ok = false; }
+                                    if let Ok(val) = np[3][1..].parse::<f32>() { self.grid.m = val; } else { ok = false; }
+                                    if let Ok(val) = np[4][1..].parse::<f32>() { self.grid.r0 = val; } else { ok = false; }
+                                }
+                            } else { ok = false; }
+                            let width = self.grid.width as usize;
+                            let height = self.grid.height as usize;
+                            let reader = BufReader::new(file);
+                            let mut head = false;
+                            for line_result in reader.lines() {
+                                if ok  && let Ok(line_str) = line_result {
+                                    let trimmed = line_str.trim();
+                                    if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+                                        continue;
+                                    }
+                                    if !head {
+                                        if !trimmed.starts_with("x,y,z,g00,") { ok = false; break; }
+                                        head = true;
+                                        continue;
+                                    }
+                                    let parts: Vec<&str> = trimmed.split(',').collect();
+                                    if parts.len() >= 55 {
+                                        let cx = parts[0].parse::<i32>().unwrap_or(0);
+                                        let cy = parts[1].parse::<i32>().unwrap_or(0);
+                                        let cz = parts[2].parse::<i32>().unwrap_or(0);
+                                        let x = (cx + (self.grid.width as i32) / 2) as u32;
+                                        let y = (cy + (self.grid.height as i32) / 2) as u32;
+                                        let z = (cz + (self.grid.depth as i32) / 2) as u32;
+                                        if x < self.grid.width && y < self.grid.height && z < self.grid.depth {
+                                            let idx_1d = x as usize + (y as usize * width) + (z as usize * width * height);
+                                            for i in 0..52 {
+                                                if let Ok(val) = parts[i + 3].trim().parse::<f32>() {
+                                                    self.grid.data[idx_1d].data[i] = val;
+                                                }
+                                            }
+                                        } else { ok = false; break; }
+                                    } else { ok = false;  break; }
+                                } else { ok = false;  break; }
+                            }
+                            if ok && let Some(interface_arc) = &self.gpu_interface {                    
+                                if let Ok(mut interface) = interface_arc.lock() {
+                                    println!("A szimulációs adatok sikeresen visszaolvasva");
+                                    interface.write_buffer(&self.grid.data);
+                                    interface.copy_dims(self.dims_data);
+                                } else { ok = false; }
+                            } else { ok = false; }
+                        } else { ok = false; }
+                        if ok {
+                            self.sclice_statistic(ctx);
+                            ui.ctx().request_repaint();
+                        }
                     }
                 }
                 

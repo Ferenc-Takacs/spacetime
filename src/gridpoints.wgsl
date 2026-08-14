@@ -388,21 +388,23 @@ fn get_christoffel_at(address: i32, d: i32) -> Christoffel40 {
     if( adr_x_p < 0 || adr_x_m < 0 ) {
         if( adr_x_p < 0 ) {
             der.g_x_m = get_metric(OLD,adr_x_m, METRIC);
-            if( d == 2 ) {
-                let ad_x_p = next(address, 1, 0, 0);
-                if( ad_x_p < 0 ) { der.g_x_p = g_center; der.d_x = 1.0 / (2.0 * dims.dxyz); }
-                else { der.g_x_p = get_metric(OLD,ad_x_p, METRIC); der.d_x = 1.0 / (3.0 * dims.dxyz); }
-            }
-            else { der.g_x_p = g_center; der.d_x = 1.0 / dims.dxyz; }
+            der.g_x_p = g_center; der.d_x = 1.0 / ( dims.dxyz + dims.dt * sqrt(max(1e-8, -g_center[0])));
+            //if( d == 2 ) {
+            //    let ad_x_p = next(address, 1, 0, 0);
+            //    if( ad_x_p < 0 ) { der.g_x_p = g_center; der.d_x = 1.0 / (2.0 * dims.dxyz); }
+            //    else { der.g_x_p = get_metric(OLD,ad_x_p, METRIC); der.d_x = 1.0 / (3.0 * dims.dxyz); }
+            //}
+            //else { der.g_x_p = g_center; der.d_x = 1.0 / dims.dxyz; }
         }
         else { // adr_x_m < 0
             der.g_x_p = get_metric(OLD,adr_x_p, METRIC);
-            if( d == 2 ) {
-                let ad_x_m = next(address,-1, 0, 0);
-                if( ad_x_m < 0 ) { der.g_x_m = g_center; der.d_x = 1.0 / (2.0 * dims.dxyz); }
-                else { der.g_x_m = get_metric(OLD,ad_x_m, METRIC); der.d_x = 1.0 / (3.0 * dims.dxyz); }
-            }
-            else { der.g_x_m = g_center; der.d_x = 1.0 / dims.dxyz; }
+            der.g_x_m = g_center; der.d_x = 1.0 / ( dims.dxyz + dims.dt * sqrt(max(1e-8, -g_center[0])));
+            //if( d == 2 ) {
+            //    let ad_x_m = next(address,-1, 0, 0);
+            //    if( ad_x_m < 0 ) { der.g_x_m = g_center; der.d_x = 1.0 / (2.0 * dims.dxyz); }
+            //    else { der.g_x_m = get_metric(OLD,ad_x_m, METRIC); der.d_x = 1.0 / (3.0 * dims.dxyz); }
+            //}
+            //else { der.g_x_m = g_center; der.d_x = 1.0 / dims.dxyz; }
         }
     }
     else {
@@ -416,21 +418,23 @@ fn get_christoffel_at(address: i32, d: i32) -> Christoffel40 {
     if( adr_y_p < 0 || adr_y_m < 0 ) {
         if( adr_y_p < 0 ) {
             der.g_y_m = get_metric(OLD,adr_y_m, METRIC);
-            if( d == 2 ) {
-                let ad_y_p = next(address, 0, 1, 0);
-                if( ad_y_p < 0 ) { der.g_y_p = g_center; der.d_y = 1.0 / (2.0 * dims.dxyz); }
-                else { der.g_y_p = get_metric(OLD,ad_y_p, METRIC); der.d_y = 1.0 / (3.0 * dims.dxyz); }
-            }
-            else { der.g_y_p = g_center; der.d_y = 1.0 / dims.dxyz; }
+            der.g_y_p = g_center; der.d_y = 1.0 / ( dims.dxyz + dims.dt * sqrt(max(1e-8, -g_center[0])));
+            //if( d == 2 ) {
+            //    let ad_y_p = next(address, 0, 1, 0);
+            //    if( ad_y_p < 0 ) { der.g_y_p = g_center; der.d_y = 1.0 / (2.0 * dims.dxyz); }
+            //    else { der.g_y_p = get_metric(OLD,ad_y_p, METRIC); der.d_y = 1.0 / (3.0 * dims.dxyz); }
+            //}
+            //else { der.g_y_p = g_center; der.d_y = 1.0 / dims.dxyz; }
         }
         else { // adr_y_m < 0
             der.g_y_p = get_metric(OLD,adr_y_p, METRIC);
-            if( d == 2 ) {
-                let ad_y_m = next(address, 0,-1, 0);
-                if( ad_y_m < 0 ) { der.g_y_m = g_center; der.d_y = 1.0 / (2.0 * dims.dxyz); }
-                else { der.g_y_m = get_metric(OLD,ad_y_m, METRIC); der.d_y = 1.0 / (3.0 * dims.dxyz); }
-            }
-            else { der.g_y_m = g_center; der.d_y = 1.0 / dims.dxyz; }
+            der.g_y_m = g_center; der.d_y = 1.0 / ( dims.dxyz + dims.dt * sqrt(max(1e-8, -g_center[0])));
+            //if( d == 2 ) {
+            //    let ad_y_m = next(address, 0,-1, 0);
+            //    if( ad_y_m < 0 ) { der.g_y_m = g_center; der.d_y = 1.0 / (2.0 * dims.dxyz); }
+            //    else { der.g_y_m = get_metric(OLD,ad_y_m, METRIC); der.d_y = 1.0 / (3.0 * dims.dxyz); }
+            //}
+            //else { der.g_y_m = g_center; der.d_y = 1.0 / dims.dxyz; }
         }
     }
     else {
@@ -444,21 +448,23 @@ fn get_christoffel_at(address: i32, d: i32) -> Christoffel40 {
     if( adr_z_p < 0 || adr_z_m < 0 ) {
         if( adr_z_p < 0 ) {
             der.g_z_m = get_metric(OLD,adr_z_m, METRIC);
-            if( d == 2 ) {
-                let ad_z_p = next(address, 0, 0, 1);
-                if( ad_z_p < 0 ) { der.g_z_p = g_center; der.d_z = 1.0 / (2.0 * dims.dxyz); }
-                else { der.g_z_p = get_metric(OLD,ad_z_p, METRIC); der.d_z = 1.0 / (3.0 * dims.dxyz); }
-            }
-            else { der.g_z_p = g_center; der.d_z = 1.0 / dims.dxyz; }
+            der.g_z_p = g_center; der.d_z = 1.0 / ( dims.dxyz + dims.dt * sqrt(max(1e-8, -g_center[0])));
+            //if( d == 2 ) {
+            //    let ad_z_p = next(address, 0, 0, 1);
+            //    if( ad_z_p < 0 ) { der.g_z_p = g_center; der.d_z = 1.0 / (2.0 * dims.dxyz); }
+            //    else { der.g_z_p = get_metric(OLD,ad_z_p, METRIC); der.d_z = 1.0 / (3.0 * dims.dxyz); }
+            //}
+            //else { der.g_z_p = g_center; der.d_z = 1.0 / dims.dxyz; }
         }
         else { // adr_z_m < 0
             der.g_z_p = get_metric(OLD,adr_z_p, METRIC);
-            if( d == 2 ) {
-                let ad_z_m = next(address, 0, 0,-1);
-                if( ad_z_m < 0 ) { der.g_z_m = g_center; der.d_z = 1.0 / (2.0 * dims.dxyz); }
-                else { der.g_z_m = get_metric(OLD,ad_z_m, METRIC); der.d_z = 1.0 / (3.0 * dims.dxyz); }
-            }
-            else { der.g_z_m = g_center; der.d_z = 1.0 / dims.dxyz; }
+            der.g_z_m = g_center; der.d_z = 1.0 / ( dims.dxyz + dims.dt * sqrt(max(1e-8, -g_center[0])));
+            //if( d == 2 ) {
+            //    let ad_z_m = next(address, 0, 0,-1);
+            //    if( ad_z_m < 0 ) { der.g_z_m = g_center; der.d_z = 1.0 / (2.0 * dims.dxyz); }
+            //    else { der.g_z_m = get_metric(OLD,ad_z_m, METRIC); der.d_z = 1.0 / (3.0 * dims.dxyz); }
+            //}
+            //else { der.g_z_m = g_center; der.d_z = 1.0 / dims.dxyz; }
         }
     }
     else {
@@ -1005,7 +1011,7 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
     if ( address<0 ) { return; }
 
     var sponge_factor = 1.0;
-    let sponge_len = 3u;
+    let sponge_len = 4u;
     let w = i32(dims.width); let h = i32(dims.height); let d = i32(dims.depth);
     let dist_x = min(coords.x, u32(w - 1) - coords.x);
     let dist_y = min(coords.y, u32(h - 1) - coords.y);
@@ -1031,8 +1037,8 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
     let T_em      = get_metric(OLD, address, ENERGY); // ENERGY_TENSOR slot (A phase3-ból)
 
     let R_scalar  = get_scalar(NEW, address, R_SCALAR);
-    let K_scalar  = get_scalar(NEW, address, K_SCALAR);
-    let C2_scalar = get_scalar(NEW, address, C2_SCALAR);
+    let K_scalar  = get_scalar(NEW, address, K_SCALAR) * sponge_factor;;
+    let C2_scalar = get_scalar(NEW, address, C2_SCALAR) * sponge_factor;;
     
     let ell_P_negyzet = 1.0;
     let phi = 2.0 * ell_P_negyzet * (K_scalar + (1.0 / 3.0) * C2_scalar);
@@ -1060,7 +1066,7 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
         // új complementer_tension operátoron keresztül a szabad irányokat pumpálja!
         let source_term = T_em[r] + local_phi * complementer_tension - ricci[r];
         // Euler-időléptetés a momentumra
-        var k = (k_past[r] + local_dt * source_term) * sponge_factor;
+        var k = (k_past[r] + local_dt * source_term);// * sponge_factor;
         // Túlcsordulás és NaN elleni szoftveres védőgát feloldása
         //if (isInfNan(k)) {
         //    k = k_past[r] * 0.5; // Ha instabillá válna, finoman visszahúzzuk a rácsot
