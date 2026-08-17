@@ -381,9 +381,9 @@ struct SpacetimeApp {
 
 impl SpacetimeApp {
     fn new() -> Self {
-        let width  = 54;
-        let height = 54;
-        let depth  = 54;
+        let width  = 53;
+        let height = 53;
+        let depth  = 53;
         let dx: f32 = 0.5;
         let dt: f32 = dx * 0.001;
         let m = 1.6;
@@ -1000,11 +1000,11 @@ impl SpacetimeGrid {
         grid
     }
     pub fn one_static_schwarzschild(&mut self) {
-        let cx = self.width as f32 / 2.0;
-        let cy = self.height as f32 / 2.0;
-        let cz = self.depth as f32 / 2.0;
+        let cx = (self.width-1) as f32 / 2.0;
+        let cy = (self.height-1) as f32 / 2.0;
+        let cz = (self.depth-1) as f32 / 2.0;
 
-        let a_spin = 0.01; 
+        let a_spin = 0.02; 
 
         for z in 0..self.depth {
             for y in 0..self.height {
@@ -1071,17 +1071,7 @@ impl SpacetimeGrid {
     }
 
     fn get_deriv(&self, mu: u32, a: u32, b: u32, d: &Derive) -> f32 {
-        if mu == 0 {
-            if a == 0 && b == 0 {
-                let dx_g00 = (Self::extract_metric_element(&d.g_x_p, 0, 0) - Self::extract_metric_element(&d.g_x_m, 0, 0)) * d.d_x;
-                let dy_g00 = (Self::extract_metric_element(&d.g_y_p, 0, 0) - Self::extract_metric_element(&d.g_y_m, 0, 0)) * d.d_y;
-                let dz_g00 = (Self::extract_metric_element(&d.g_z_p, 0, 0) - Self::extract_metric_element(&d.g_z_m, 0, 0)) * d.d_z;
-                let v_x = Self::extract_metric_element(&d.g_center, 0, 1); // g01 komponens
-                let v_y = Self::extract_metric_element(&d.g_center, 0, 2); // g02 komponens
-                let v_z = Self::extract_metric_element(&d.g_center, 0, 3); // g03 komponens
-                let dt_g00 = (v_x * dx_g00 + v_y * dy_g00 + v_z * dz_g00) * d.d_t;
-                return dt_g00;
-            }
+        if mu == 0 { // nothing
             return 0.0;
         }
         else if mu == 1 { return (Self::extract_metric_element(&d.g_x_p, a, b) - Self::extract_metric_element(&d.g_x_m, a, b)) * d.d_x; }
@@ -1089,11 +1079,12 @@ impl SpacetimeGrid {
         else            { return (Self::extract_metric_element(&d.g_z_p, a, b) - Self::extract_metric_element(&d.g_z_m, a, b)) * d.d_z; }
     }
 
-    fn get_metric(&self, x: u32, y: u32, z: u32) -> Metricpoint {
-        let x_ = x.clamp(0, self.width - 1);
-        let y_ = y.clamp(0, self.height - 1);
-        let z_ = z.clamp(0, self.depth - 1);
-        let idx = (x_ + y_ * self.width + z_ * self.width * self.height) as usize;
+    fn get_metric(&self, x: i32, y: i32, z: i32, same: &mut bool) -> Metricpoint {
+        let x_ = x.clamp(0, self.width as i32 - 1);
+        let y_ = y.clamp(0, self.height as i32 - 1);
+        let z_ = z.clamp(0, self.depth as i32 - 1);
+        *same = x==x_ && y==y_ && z==z_;
+        let idx = (x_ as u32 + y_ as u32 * self.width + z_ as u32 * self.width * self.height) as usize;
         let mets =  self.data[idx];
         let mut met = Metricpoint{ d: [0.0; 10], };
         for i in 0..10 {
@@ -1113,44 +1104,56 @@ impl SpacetimeGrid {
 
     pub fn calculate_moments(&mut self) {
 
-        for z in 0..self.depth {
-            for y in 0..self.height {
-                for x in 0..self.width {
+        for z_ in 0..self.depth {
+            let z = z_ as i32;
+            for y_ in 0..self.height {
+                let y = y_ as i32;
+                for x_ in 0..self.width {
+                    let x = x_ as i32;
 
                     let mut der = Derive::new();
-                    der.g_center = self.get_metric(x,y,z);
-                    der.g_x_p = self.get_metric(x+1,y  ,z  );
-                    der.g_x_m = self.get_metric(x-1,y  ,z  );
-                    der.g_y_p = self.get_metric(x  ,y+1,z  );
-                    der.g_y_m = self.get_metric(x  ,y-1,z  );
-                    der.g_z_p = self.get_metric(x  ,y  ,z+1);
-                    der.g_z_m = self.get_metric(x  ,y  ,z-1);
+                    let mut same_p = true;
+                    let mut same_m = true;
                     der.d_x = 1.0 / (2.0 * self.dx);
                     der.d_y = der.d_x;
                     der.d_z = der.d_x;
                     der.d_t = self.dt;
+                    der.g_center = self.get_metric(x,y,z, &mut same_p);
+                    der.g_x_p = self.get_metric(x+1,y  ,z  , &mut same_p);
+                    der.g_x_m = self.get_metric(x-1,y  ,z  , &mut same_m);
+                    if !same_p || !same_m { der.d_x = der.d_x * 2.0;}
+                    der.g_y_p = self.get_metric(x  ,y+1,z  , &mut same_p);
+                    der.g_y_m = self.get_metric(x  ,y-1,z  , &mut same_m);
+                    if !same_p || !same_m { der.d_y = der.d_y * 2.0;}
+                    der.g_z_p = self.get_metric(x  ,y  ,z+1, &mut same_p);
+                    der.g_z_m = self.get_metric(x  ,y  ,z-1, &mut same_m);
+                    if !same_p || !same_m { der.d_z = der.d_z * 2.0;}
                     // A legelső körben (t=0) a momentumokat a térbeli elcsavarodás deriváltjaiból generáljuk le!
                     // Diagonális momentumok kezdetben zérók statikus/forgó egyensúlynál
                     let mut k_past = Metricpoint{ d: [0.0; 10], };
-                    k_past.d[0] = 0.0; k_past.d[1] = 0.0; k_past.d[2] = 0.0; k_past.d[3] = 0.0;
+                    //k_past.d[0] = 0.0; k_past.d[1] = 0.0; k_past.d[2] = 0.0; k_past.d[3] = 0.0;
                     // A Kerr-Schild elcsavarodási kereszt-tagok numerikus deriválása:
                     // k_ij = 0.5 * (d_i g_0j + d_j g_0i) -> a te extract_metric_element függvényedet használva:
                     let d1_g01 = self.get_deriv(1, 0, 1, &der); // M=1, N=(0,1)
+                    let d2_g02 = self.get_deriv(2, 0, 2, &der);
+                    let d3_g03 = self.get_deriv(3, 0, 3, &der);
+                    
                     let d1_g02 = self.get_deriv(1, 0, 2, &der);
                     let d2_g01 = self.get_deriv(2, 0, 1, &der);
+                    
                     let d1_g03 = self.get_deriv(1, 0, 3, &der);
                     let d3_g01 = self.get_deriv(3, 0, 1, &der);
-                    let d2_g02 = self.get_deriv(2, 0, 2, &der);
+                    
                     let d2_g03 = self.get_deriv(2, 0, 3, &der);
                     let d3_g02 = self.get_deriv(3, 0, 2, &der);
-                    let d3_g03 = self.get_deriv(3, 0, 3, &der);
+                    
                     k_past.d[4] = d1_g01;                      // k01 = 0.5 * (d_1 g_01 + d_1 g_01) = d_1 g_01
                     k_past.d[5] = 0.5 * (d1_g02 + d2_g01);     // k02
                     k_past.d[6] = 0.5 * (d1_g03 + d3_g01);     // k03
                     k_past.d[7] = d2_g02;                      // k12 = d_2 g_02
                     k_past.d[8] = 0.5 * (d2_g03 + d3_g02);     // k13
                     k_past.d[9] = d3_g03;                      // k23 = d_3 g_03
-                    self.set_metric(x,y,z, &k_past, 10);
+                    self.set_metric(x_,y_,z_, &k_past, 10);
 
                 }
             }

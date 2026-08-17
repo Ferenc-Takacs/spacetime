@@ -324,22 +324,27 @@ fn phase1(@builtin(global_invocation_id) coords: vec3<u32>) {
 }
 // ==========================================
 
+/*
+const to_idx = array(
+    0u, 4u, 5u, 6u,
+    4u, 1u, 7u, 8u,
+    5u, 7u, 2u, 9u,
+    6u, 8u, 9u, 3u);
+const from_idx0 = array(0u,1u,2u,3u,0u,0u,0u,1u,1u,2u);
+const from_idx1 = array(0u,1u,2u,3u,1u,2u,3u,2u,3u,3u);
+*/
 
-fn extract_metric_element(p: MetricPoint, a: u32, b: u32) -> f32 {
-    var u = a;
-    var v = b;
-    if (a > b) { u = b; v = a; }
-    if (u == 0u && v == 0u) { return p[0]; }
-    if (u == 1u && v == 1u) { return p[1]; }
-    if (u == 2u && v == 2u) { return p[2]; }
-    if (u == 3u && v == 3u) { return p[3]; }
-    if (u == 0u && v == 1u) { return p[4]; }
-    if (u == 0u && v == 2u) { return p[5]; }
-    if (u == 0u && v == 3u) { return p[6]; }
-    if (u == 1u && v == 2u) { return p[7]; }
-    if (u == 1u && v == 3u) { return p[8]; }
-    if (u == 2u && v == 3u) { return p[9]; }
-    return 0.0;
+fn To_idx(a: u32, b: u32) -> u32 {
+    if( a==b ) { return a; }
+    var A = a;
+    var B = b;
+    if(a>b ) { A = b; B = a; }
+    if( A==0 && B==1) { return 4; }
+    if( A==0 && B==2) { return 5; }
+    if( A==0 && B==3) { return 6; }
+    if( A==1 && B==2) { return 7; }
+    if( A==1 && B==3) { return 8; }
+    return 9;
 }
 
 struct Derive {
@@ -359,13 +364,13 @@ fn get_deriv(mu: u32, a: u32, b: u32, d: Derive) -> f32 {
     if (mu == 0u) {
         if (a == 0u && b == 0u) {
             // 1. LÉPÉS: A g00 elem tiszta térbeli gradiensei (d.d_x tartalmazza a rácssimítást!)
-            let dx_g00 = (extract_metric_element(d.g_x_p, 0u, 0u) - extract_metric_element(d.g_x_m, 0u, 0u)) * d.d_x;
-            let dy_g00 = (extract_metric_element(d.g_y_p, 0u, 0u) - extract_metric_element(d.g_y_m, 0u, 0u)) * d.d_y;
-            let dz_g00 = (extract_metric_element(d.g_z_p, 0u, 0u) - extract_metric_element(d.g_z_m, 0u, 0u)) * d.d_z;
+            let dx_g00 = (d.g_x_p[0u] - d.g_x_m[0u]) * d.d_x;
+            let dy_g00 = (d.g_y_p[0u] - d.g_y_m[0u]) * d.d_y;
+            let dz_g00 = (d.g_z_p[0u] - d.g_z_m[0u]) * d.d_z;
             // 2. LÉPÉS: A helyi áramlási sebességek (súlyok) kiolvasása a kereszt-komponensekből (g0i)
-            let v_x = extract_metric_element(d.g_center, 0u, 1u); // g01 komponens
-            let v_y = extract_metric_element(d.g_center, 0u, 2u); // g02 komponens
-            let v_z = extract_metric_element(d.g_center, 0u, 3u); // g03 komponens
+            let v_x = d.g_center[1u]; // g01 komponens
+            let v_y = d.g_center[2u]; // g02 komponens
+            let v_z = d.g_center[3u]; // g03 komponens
             // 3. LÉPÉS: A Folyó-modell szerinti súlyozott konvektív összegzés
             // A sebességvektorok és gradiensek szorzata másodpercenkénti változást ad ki, amit beszorzunk dims.dt-vel
             let dt_g00 = (v_x * dx_g00 + v_y * dy_g00 + v_z * dz_g00) * dims.dt;
@@ -373,39 +378,36 @@ fn get_deriv(mu: u32, a: u32, b: u32, d: Derive) -> f32 {
         }
         return 0.0;
     }
-    else if (mu == 1u) { return (extract_metric_element(d.g_x_p, a, b) - extract_metric_element(d.g_x_m, a, b)) * d.d_x; }
-    else if (mu == 2u) { return (extract_metric_element(d.g_y_p, a, b) - extract_metric_element(d.g_y_m, a, b)) * d.d_y; }
-    else               { return (extract_metric_element(d.g_z_p, a, b) - extract_metric_element(d.g_z_m, a, b)) * d.d_z; }
+    else if (mu == 1u) { return (d.g_x_p[To_idx(a,b)] - d.g_x_m[To_idx(a,b)]) * d.d_x; }
+    else if (mu == 2u) { return (d.g_y_p[To_idx(a,b)] - d.g_y_m[To_idx(a,b)]) * d.d_y; }
+    else               { return (d.g_z_p[To_idx(a,b)] - d.g_z_m[To_idx(a,b)]) * d.d_z; }
 }
 
 fn get_christoffel_at(address: i32, d: i32) -> Christoffel40 {
-    let g_center  = get_metric(OLD,address, METRIC);
     let g_inverz  = get_metric(OLD,address, INVERZ);
     var der: Derive;
-    der.g_center = g_center;
+    der.g_center = get_metric(OLD,address, METRIC);
     let adr_x_p = next(address, d, 0, 0);
     let adr_x_m = next(address,-d, 0, 0);
-    if( adr_x_p < 0 || adr_x_m < 0 ) {
-        if( adr_x_p < 0 ) {
-            der.g_x_m = get_metric(OLD,adr_x_m, METRIC);
-            der.g_x_p = g_center; der.d_x = 1.0 / ( dims.dxyz + dims.dt * sqrt(max(1e-8, -g_center[0])));
-            //if( d == 2 ) {
-            //    let ad_x_p = next(address, 1, 0, 0);
-            //    if( ad_x_p < 0 ) { der.g_x_p = g_center; der.d_x = 1.0 / (2.0 * dims.dxyz); }
-            //    else { der.g_x_p = get_metric(OLD,ad_x_p, METRIC); der.d_x = 1.0 / (3.0 * dims.dxyz); }
-            //}
-            //else { der.g_x_p = g_center; der.d_x = 1.0 / dims.dxyz; }
+    if( adr_x_p < 0 ) {
+        der.g_x_m = get_metric(OLD,adr_x_m, METRIC);
+        //der.g_x_p = der.g_center; der.d_x = 1.0 / ( dims.dxyz + dims.dt * sqrt(max(1e-8, -der.g_center[0])));
+        if( d == 2 ) {
+            let ad_x_p = next(address, 1, 0, 0);
+            if( ad_x_p < 0 ) { der.g_x_p = der.g_center; der.d_x = 1.0 / (2.0 * dims.dxyz); }
+            else { der.g_x_p = get_metric(OLD,ad_x_p, METRIC); der.d_x = 1.0 / (3.0 * dims.dxyz); }
         }
-        else { // adr_x_m < 0
-            der.g_x_p = get_metric(OLD,adr_x_p, METRIC);
-            der.g_x_m = g_center; der.d_x = 1.0 / ( dims.dxyz + dims.dt * sqrt(max(1e-8, -g_center[0])));
-            //if( d == 2 ) {
-            //    let ad_x_m = next(address,-1, 0, 0);
-            //    if( ad_x_m < 0 ) { der.g_x_m = g_center; der.d_x = 1.0 / (2.0 * dims.dxyz); }
-            //    else { der.g_x_m = get_metric(OLD,ad_x_m, METRIC); der.d_x = 1.0 / (3.0 * dims.dxyz); }
-            //}
-            //else { der.g_x_m = g_center; der.d_x = 1.0 / dims.dxyz; }
+        else { der.g_x_p = der.g_center; der.d_x = 1.0 / dims.dxyz; }
+    }
+    else if( adr_x_m < 0 ){ // adr_x_m < 0
+        der.g_x_p = get_metric(OLD,adr_x_p, METRIC);
+        //der.g_x_m = der.g_center; der.d_x = 1.0 / ( dims.dxyz + dims.dt * sqrt(max(1e-8, -der.g_center[0])));
+        if( d == 2 ) {
+            let ad_x_m = next(address,-1, 0, 0);
+            if( ad_x_m < 0 ) { der.g_x_m = der.g_center; der.d_x = 1.0 / (2.0 * dims.dxyz); }
+            else { der.g_x_m = get_metric(OLD,ad_x_m, METRIC); der.d_x = 1.0 / (3.0 * dims.dxyz); }
         }
+        else { der.g_x_m = der.g_center; der.d_x = 1.0 / dims.dxyz; }
     }
     else {
         der.g_x_p = get_metric(OLD,adr_x_p, METRIC);
@@ -415,27 +417,25 @@ fn get_christoffel_at(address: i32, d: i32) -> Christoffel40 {
     
     let adr_y_p = next(address, 0, d, 0);
     let adr_y_m = next(address, 0,-d, 0);
-    if( adr_y_p < 0 || adr_y_m < 0 ) {
-        if( adr_y_p < 0 ) {
-            der.g_y_m = get_metric(OLD,adr_y_m, METRIC);
-            der.g_y_p = g_center; der.d_y = 1.0 / ( dims.dxyz + dims.dt * sqrt(max(1e-8, -g_center[0])));
-            //if( d == 2 ) {
-            //    let ad_y_p = next(address, 0, 1, 0);
-            //    if( ad_y_p < 0 ) { der.g_y_p = g_center; der.d_y = 1.0 / (2.0 * dims.dxyz); }
-            //    else { der.g_y_p = get_metric(OLD,ad_y_p, METRIC); der.d_y = 1.0 / (3.0 * dims.dxyz); }
-            //}
-            //else { der.g_y_p = g_center; der.d_y = 1.0 / dims.dxyz; }
+    if( adr_y_p < 0 ) {
+        der.g_y_m = get_metric(OLD,adr_y_m, METRIC);
+        //der.g_y_p = der.g_center; der.d_y = 1.0 / ( dims.dxyz + dims.dt * sqrt(max(1e-8, -der.g_center[0])));
+        if( d == 2 ) {
+            let ad_y_p = next(address, 0, 1, 0);
+            if( ad_y_p < 0 ) { der.g_y_p = der.g_center; der.d_y = 1.0 / (2.0 * dims.dxyz); }
+            else { der.g_y_p = get_metric(OLD,ad_y_p, METRIC); der.d_y = 1.0 / (3.0 * dims.dxyz); }
         }
-        else { // adr_y_m < 0
-            der.g_y_p = get_metric(OLD,adr_y_p, METRIC);
-            der.g_y_m = g_center; der.d_y = 1.0 / ( dims.dxyz + dims.dt * sqrt(max(1e-8, -g_center[0])));
-            //if( d == 2 ) {
-            //    let ad_y_m = next(address, 0,-1, 0);
-            //    if( ad_y_m < 0 ) { der.g_y_m = g_center; der.d_y = 1.0 / (2.0 * dims.dxyz); }
-            //    else { der.g_y_m = get_metric(OLD,ad_y_m, METRIC); der.d_y = 1.0 / (3.0 * dims.dxyz); }
-            //}
-            //else { der.g_y_m = g_center; der.d_y = 1.0 / dims.dxyz; }
+        else { der.g_y_p = der.g_center; der.d_y = 1.0 / dims.dxyz; }
+    }
+    else if( adr_y_m < 0 ){ // adr_y_m < 0
+        der.g_y_p = get_metric(OLD,adr_y_p, METRIC);
+        //der.g_y_m = der.g_center; der.d_y = 1.0 / ( dims.dxyz + dims.dt * sqrt(max(1e-8, -der.g_center[0])));
+        if( d == 2 ) {
+            let ad_y_m = next(address, 0,-1, 0);
+            if( ad_y_m < 0 ) { der.g_y_m = der.g_center; der.d_y = 1.0 / (2.0 * dims.dxyz); }
+            else { der.g_y_m = get_metric(OLD,ad_y_m, METRIC); der.d_y = 1.0 / (3.0 * dims.dxyz); }
         }
+        else { der.g_y_m = der.g_center; der.d_y = 1.0 / dims.dxyz; }
     }
     else {
         der.g_y_p = get_metric(OLD,adr_y_p, METRIC);
@@ -445,27 +445,25 @@ fn get_christoffel_at(address: i32, d: i32) -> Christoffel40 {
     
     let adr_z_p = next(address, 0, 0, d);
     let adr_z_m = next(address, 0, 0,-d);
-    if( adr_z_p < 0 || adr_z_m < 0 ) {
-        if( adr_z_p < 0 ) {
-            der.g_z_m = get_metric(OLD,adr_z_m, METRIC);
-            der.g_z_p = g_center; der.d_z = 1.0 / ( dims.dxyz + dims.dt * sqrt(max(1e-8, -g_center[0])));
-            //if( d == 2 ) {
-            //    let ad_z_p = next(address, 0, 0, 1);
-            //    if( ad_z_p < 0 ) { der.g_z_p = g_center; der.d_z = 1.0 / (2.0 * dims.dxyz); }
-            //    else { der.g_z_p = get_metric(OLD,ad_z_p, METRIC); der.d_z = 1.0 / (3.0 * dims.dxyz); }
-            //}
-            //else { der.g_z_p = g_center; der.d_z = 1.0 / dims.dxyz; }
+    if( adr_z_p < 0 ) {
+        der.g_z_m = get_metric(OLD,adr_z_m, METRIC);
+        //der.g_z_p = der.g_center; der.d_z = 1.0 / ( dims.dxyz + dims.dt * sqrt(max(1e-8, -der.g_center[0])));
+        if( d == 2 ) {
+            let ad_z_p = next(address, 0, 0, 1);
+            if( ad_z_p < 0 ) { der.g_z_p = der.g_center; der.d_z = 1.0 / (2.0 * dims.dxyz); }
+            else { der.g_z_p = get_metric(OLD,ad_z_p, METRIC); der.d_z = 1.0 / (3.0 * dims.dxyz); }
         }
-        else { // adr_z_m < 0
-            der.g_z_p = get_metric(OLD,adr_z_p, METRIC);
-            der.g_z_m = g_center; der.d_z = 1.0 / ( dims.dxyz + dims.dt * sqrt(max(1e-8, -g_center[0])));
-            //if( d == 2 ) {
-            //    let ad_z_m = next(address, 0, 0,-1);
-            //    if( ad_z_m < 0 ) { der.g_z_m = g_center; der.d_z = 1.0 / (2.0 * dims.dxyz); }
-            //    else { der.g_z_m = get_metric(OLD,ad_z_m, METRIC); der.d_z = 1.0 / (3.0 * dims.dxyz); }
-            //}
-            //else { der.g_z_m = g_center; der.d_z = 1.0 / dims.dxyz; }
+        else { der.g_z_p = der.g_center; der.d_z = 1.0 / dims.dxyz; }
+    }
+    else if( adr_z_m < 0 ) { // adr_z_m < 0
+        der.g_z_p = get_metric(OLD,adr_z_p, METRIC);
+        //der.g_z_m = der.g_center; der.d_z = 1.0 / ( dims.dxyz + dims.dt * sqrt(max(1e-8, -der.g_center[0])));
+        if( d == 2 ) {
+            let ad_z_m = next(address, 0, 0,-1);
+            if( ad_z_m < 0 ) { der.g_z_m = der.g_center; der.d_z = 1.0 / (2.0 * dims.dxyz); }
+            else { der.g_z_m = get_metric(OLD,ad_z_m, METRIC); der.d_z = 1.0 / (3.0 * dims.dxyz); }
         }
+        else { der.g_z_m = der.g_center; der.d_z = 1.0 / dims.dxyz; }
     }
     else {
         der.g_z_p = get_metric(OLD,adr_z_p, METRIC);
@@ -473,67 +471,34 @@ fn get_christoffel_at(address: i32, d: i32) -> Christoffel40 {
         der.d_z = 1.0 / (2.0 * f32(d) * dims.dxyz);
     }
 
-    var ch: Christoffel40;
+    var chris: Christoffel40;
     for (var L = 0u; L < 4u; L++) {
-        var temp_diag = vec4<f32>(0.0);
-        var temp_cross = vec4<f32>(0.0);
-        var temp_rest = vec2<f32>(0.0);
+        var tmp : MetricPoint;
         for (var k = 0u; k < 10u; k++) {
-            var M = 0u; var N = 0u;
-            if      (k == 0u) { M = 0u; N = 0u; }
-            else if (k == 1u) { M = 1u; N = 1u; }
-            else if (k == 2u) { M = 2u; N = 2u; }
-            else if (k == 3u) { M = 3u; N = 3u; }
-            else if (k == 4u) { M = 0u; N = 1u; }
-            else if (k == 5u) { M = 0u; N = 2u; }
-            else if (k == 6u) { M = 0u; N = 3u; }
-            else if (k == 7u) { M = 1u; N = 2u; }
-            else if (k == 8u) { M = 1u; N = 3u; }
-            else              { M = 2u; N = 3u; }
-
+            var M = k;
+            var N = k;
+            if( k==4u )      { M=0u; N=1u; }
+            else if( k==5u ) { M=0u; N=2u; }
+            else if( k==6u ) { M=0u; N=3u; }
+            else if( k==7u ) { M=1u; N=2u; }
+            else if( k==8u ) { M=1u; N=3u; }
+            else if( k==9u ) { M=2u; N=3u; }
             var val = 0.0;
             for (var sig = 0u; sig < 4u; sig++) {
-                let inv_g_L_sig = extract_metric_element(g_inverz, L, sig);
+                let inv_g_L_sig = g_inverz[To_idx(L,sig)];
                 let dM_gNsig = get_deriv(M, N, sig, der);
                 let dN_gMsig = get_deriv(N, M, sig, der);
                 let dsig_gMN = get_deriv(sig, M, N, der);
                 val += 0.5 * inv_g_L_sig * (dM_gNsig + dN_gMsig - dsig_gMN);
             }
-            if (k == 0u)      { temp_diag.x = val; }
-            else if (k == 1u) { temp_diag.y = val; }
-            else if (k == 2u) { temp_diag.z = val; }
-            else if (k == 3u) { temp_diag.w = val; }
-            else if (k == 4u) { temp_cross.x = val; }
-            else if (k == 5u) { temp_cross.y = val; }
-            else if (k == 6u) { temp_cross.z = val; }
-            else if (k == 7u) { temp_cross.w = val; }
-            else if (k == 8u) { temp_rest.x = val; }
-            else              { temp_rest.y = val; }
+            tmp[k] = val;
         }
-
-        if (L == 0u) {
-            ch[0] = temp_diag.x;  ch[1] = temp_diag.y;  ch[2] = temp_diag.z;  ch[3] = temp_diag.w;
-            ch[4] = temp_cross.x; ch[5] = temp_cross.y; ch[6] = temp_cross.z; ch[7] = temp_cross.w;
-            ch[8] = temp_rest.x;  ch[9] = temp_rest.y;
+        for (var k = 0u; k < 10u; k++) {
+            let i = L*10+k;
+            chris[i] = tmp[k];
         }
-        else if (L == 1u) {
-            ch[10] = temp_diag.x;  ch[11] = temp_diag.y;  ch[12] = temp_diag.z;  ch[13] = temp_diag.w;
-            ch[14] = temp_cross.x; ch[15] = temp_cross.y; ch[16] = temp_cross.z; ch[17] = temp_cross.w;
-            ch[18] = temp_rest.x;  ch[19] = temp_rest.y;
-        }
-        else if (L == 2u) {
-            ch[20] = temp_diag.x;  ch[21] = temp_diag.y;  ch[22] = temp_diag.z;  ch[23] = temp_diag.w;
-            ch[24] = temp_cross.x; ch[25] = temp_cross.y; ch[26] = temp_cross.z; ch[27] = temp_cross.w;
-            ch[28] = temp_rest.x;  ch[29] = temp_rest.y;
-        }
-        else {
-            ch[30] = temp_diag.x;  ch[31] = temp_diag.y;  ch[32] = temp_diag.z;  ch[33] = temp_diag.w;
-            ch[34] = temp_cross.x; ch[35] = temp_cross.y; ch[36] = temp_cross.z; ch[37] = temp_cross.w;
-            ch[38] = temp_rest.x;  ch[39] = temp_rest.y;
-        }
-
     }
-    return ch;
+    return chris;
 }
 
 // ==========================================
@@ -556,51 +521,31 @@ fn phase2(@builtin(global_invocation_id) coords: vec3<u32>) {
 }
 // ==========================================
 
-
-fn extract_gamma(ch: Christoffel40, L: u32, M: u32, N: u32) -> f32 {
-    // Biztosítjuk a szimmetriát az alsó indexeknél (M <= N)
-    var u = M; var v = N;
-    if (M > N) { u = N; v = M; }
-
-    // Kiszámoljuk az alsó indexpár belső k-indexét (0..9)
-    var k = 0u;
-    if (u == 0u && v == 0u)      { k = 0u; }
-    else if (u == 1u && v == 1u) { k = 1u; }
-    else if (u == 2u && v == 2u) { k = 2u; }
-    else if (u == 3u && v == 3u) { k = 3u; }
-    else if (u == 0u && v == 1u) { k = 4u; }
-    else if (u == 0u && v == 2u) { k = 5u; }
-    else if (u == 0u && v == 3u) { k = 6u; }
-    else if (u == 1u && v == 2u) { k = 7u; }
-    else if (u == 1u && v == 3u) { k = 8u; }
-    else                         { k = 9u; }
-
-    // A felső index (L) eltolja a bázisindexet 10-esével
-    let final_index = (L * 10u) + k;
-    return ch[final_index];
-}
-
 fn deriv_gamma(address: i32, L: u32, M: u32, N: u32, dir: u32) -> f32 {
-    var coords_plus = address;  var coords_minus = address;
-    if (dir == 1u)      { coords_plus = next(address,1,0,0); coords_minus = next(address,-1,0,0); }
-    else if (dir == 2u) { coords_plus = next(address,0,1,0); coords_minus = next(address,0,-1,0); }
-    else if (dir == 3u) { coords_plus = next(address,0,0,1); coords_minus = next(address,0,0,-1); }
+    var coords_plus  = address; var coords_minus = address;
+    if (dir == 1u)      { coords_plus = next(address, 1, 0, 0); coords_minus = next(address, -1, 0, 0); }
+    else if (dir == 2u) { coords_plus = next(address, 0, 1, 0); coords_minus = next(address, 0, -1, 0); }
+    else if (dir == 3u) { coords_plus = next(address, 0, 0, 1); coords_minus = next(address, 0, 0, -1); }
 
     var ch_plus: Christoffel40;
     var ch_minus: Christoffel40;
-    if (coords_plus >= 0)  { ch_plus  = load_christoffel_scratchpad(coords_plus); }
-    if (coords_minus >= 0) { ch_minus = load_christoffel_scratchpad(coords_minus); }
+    var mul = 0.5 / dims.dxyz;
+    if (coords_plus < 0 ) { ch_plus = load_christoffel_scratchpad(address); mul = mul * 2.0; }
+    else { ch_plus  = load_christoffel_scratchpad(coords_plus); }
+    if (coords_minus < 0) { ch_minus = load_christoffel_scratchpad(address); mul = mul * 2.0; }
+    else { ch_minus  = load_christoffel_scratchpad(coords_minus); }
 
-    return (extract_gamma(ch_plus, L, M, N) - extract_gamma(ch_minus, L, M, N)) * 0.5 / dims.dxyz;
+    let idx = L * 10u + To_idx(M,N);
+    return (ch_plus[idx] - ch_minus[idx]) * mul;
 }
 
-fn get_riemann_element(address: i32, ch: Christoffel40, L: u32, M: u32, N: u32, nu: u32) -> f32 {
+fn get_riemann_element(address: i32, chris: Christoffel40, L: u32, M: u32, N: u32, nu: u32) -> f32 {
     // Riemann formula: d_N Gamma^L_M_nu - d_nu Gamma^L_M_N + Gamma * Gamma tagok
     let term_deriv = deriv_gamma(address, L, M, nu, N) - deriv_gamma(address, L, M, N, nu);
     var term_nonlinear = 0.0;
     for (var s = 0u; s < 4u; s = s + 1u) {
-        term_nonlinear += extract_gamma(ch, L, s, N) * extract_gamma(ch, s, M, nu) 
-                        - extract_gamma(ch, L, s, nu) * extract_gamma(ch, s, M, N);
+        term_nonlinear += chris[L * 10u + To_idx(s,N)]  * chris[s * 10u + To_idx(M,nu)] 
+                        - chris[L * 10u + To_idx(s,nu)] * chris[s * 10u + To_idx(M,N)];
     }
     return term_deriv + term_nonlinear;
 }
@@ -622,72 +567,75 @@ struct Riemann20 {
 }
 
 
-fn compute_riemann_20(address: i32, ch: Christoffel40, g: MetricPoint) -> Riemann20 {
+fn compute_riemann_20(address: i32, chris: Christoffel40, g: MetricPoint) -> Riemann20 {
     var R: Riemann20;
-    // Segéd-vektorok az index leengedéséhez (R_abcd = g_am * R^m_bcd)
+    // Segéd-vektor az index leengedéséhez (R_abcd = g_am * R^m_bcd)
     var R_up = vec4(0.0);
+    
     // 1. Blokk: Tiszta átlós bindex elemek
     for(var m=0u; m<4u; m++)
-        { R_up[m] = get_riemann_element(address,ch,m,1u,0u,1u); }
+        { R_up[m] = get_riemann_element(address,chris,m,1u,0u,1u); }
     R.R0101 = g[0] * R_up.x + g[4] * R_up.y + g[5] * R_up.z + g[6] * R_up.w;
     for(var m=0u; m<4u; m++)
-        { R_up[m] = get_riemann_element(address,ch,m,2u,0u,2u); }
+        { R_up[m] = get_riemann_element(address,chris,m,2u,0u,2u); }
     R.R0202 = g[0] * R_up.x + g[4] * R_up.y + g[5] * R_up.z + g[6] * R_up.w;
     for(var m=0u; m<4u; m++)
-        { R_up[m] = get_riemann_element(address,ch,m,3u,0u,3u); }
+        { R_up[m] = get_riemann_element(address,chris,m,3u,0u,3u); }
     R.R0303 = g[0] * R_up.x + g[4] * R_up.y + g[5] * R_up.z + g[6] * R_up.w;
     for(var m=0u; m<4u; m++)
-        { R_up[m] = get_riemann_element(address,ch,m,2u,1u,2u); }
+        { R_up[m] = get_riemann_element(address,chris,m,2u,1u,2u); }
     R.R1212 = g[4] * R_up.x + g[1] * R_up.y + g[7] * R_up.z + g[8] * R_up.w;
     for(var m=0u; m<4u; m++)
-        { R_up[m] = get_riemann_element(address,ch,m,3u,1u,3u); }
+        { R_up[m] = get_riemann_element(address,chris,m,3u,1u,3u); }
     R.R1313 = g[4] * R_up.x + g[1] * R_up.y + g[7] * R_up.z + g[8] * R_up.w;
     for(var m=0u; m<4u; m++)
-        { R_up[m] = get_riemann_element(address,ch,m,3u,2u,3u); }
+        { R_up[m] = get_riemann_element(address,chris,m,3u,2u,3u); }
     R.R2323 = g[5] * R_up.x + g[7] * R_up.y + g[2] * R_up.z + g[9] * R_up.w;
+    
     // 2. Blokk: Kereszt-tagok
     for(var m=0u; m<4u; m++)
-        { R_up[m] = get_riemann_element(address,ch,m,1u,0u,2u); }
+        { R_up[m] = get_riemann_element(address,chris,m,1u,0u,2u); }
     R.R0102 = g[0] * R_up.x + g[4] * R_up.y + g[5] * R_up.z + g[6] * R_up.w;
     for(var m=0u; m<4u; m++)
-        { R_up[m] = get_riemann_element(address,ch,m,1u,0u,3u); }
+        { R_up[m] = get_riemann_element(address,chris,m,1u,0u,3u); }
     R.R0103 = g[0] * R_up.x + g[4] * R_up.y + g[5] * R_up.z + g[6] * R_up.w;
     for(var m=0u; m<4u; m++)
-        { R_up[m] = get_riemann_element(address,ch,m,2u,0u,3u); }
+        { R_up[m] = get_riemann_element(address,chris,m,2u,0u,3u); }
     R.R0203 = g[0] * R_up.x + g[4] * R_up.y + g[5] * R_up.z + g[6] * R_up.w;
     for(var m=0u; m<4u; m++)
-        { R_up[m] = get_riemann_element(address,ch,m,1u,1u,2u); }
+        { R_up[m] = get_riemann_element(address,chris,m,1u,1u,2u); }
     R.R0112 = g[0] * R_up.x + g[4] * R_up.y + g[5] * R_up.z + g[6] * R_up.w;
     for(var m=0u; m<4u; m++)
-        { R_up[m] = get_riemann_element(address,ch,m,1u,1u,3u); }
+        { R_up[m] = get_riemann_element(address,chris,m,1u,1u,3u); }
     R.R0113 = g[0] * R_up.x + g[4] * R_up.y + g[5] * R_up.z + g[6] * R_up.w;
     for(var m=0u; m<4u; m++)
-        { R_up[m] = get_riemann_element(address,ch,m,2u,1u,2u); }
+        { R_up[m] = get_riemann_element(address,chris,m,2u,1u,2u); }
     R.R0212 = g[0] * R_up.x + g[4] * R_up.y + g[5] * R_up.z + g[6] * R_up.w;
     for(var m=0u; m<4u; m++)
-        { R_up[m] = get_riemann_element(address,ch,m,2u,2u,3u); }
+        { R_up[m] = get_riemann_element(address,chris,m,2u,2u,3u); }
     R.R0223 = g[0] * R_up.x + g[4] * R_up.y + g[5] * R_up.z + g[6] * R_up.w;
     for(var m=0u; m<4u; m++)
-        { R_up[m] = get_riemann_element(address,ch,m,3u,1u,3u); }
+        { R_up[m] = get_riemann_element(address,chris,m,3u,1u,3u); }
     R.R0313 = g[0] * R_up.x + g[4] * R_up.y + g[5] * R_up.z + g[6] * R_up.w;
     for(var m=0u; m<4u; m++)
-        { R_up[m] = get_riemann_element(address,ch,m,3u,2u,3u); }
+        { R_up[m] = get_riemann_element(address,chris,m,3u,2u,3u); }
     R.R0323 = g[0] * R_up.x + g[4] * R_up.y + g[5] * R_up.z + g[6] * R_up.w;
+    
     // 3. Blokk: Térbeli vegyes tagok
     for(var m=0u; m<4u; m++)
-        { R_up[m] = get_riemann_element(address,ch,m,2u,1u,3u); }
+        { R_up[m] = get_riemann_element(address,chris,m,2u,1u,3u); }
     R.R1213 = g[4] * R_up.x + g[1] * R_up.y + g[7] * R_up.z + g[8] * R_up.w;
     for(var m=0u; m<4u; m++)
-        { R_up[m] = get_riemann_element(address,ch,m,2u,2u,3u); }
+        { R_up[m] = get_riemann_element(address,chris,m,2u,2u,3u); }
     R.R1223 = g[4] * R_up.x + g[1] * R_up.y + g[7] * R_up.z + g[8] * R_up.w;
     for(var m=0u; m<4u; m++)
-        { R_up[m] = get_riemann_element(address,ch,m,3u,2u,3u); }
+        { R_up[m] = get_riemann_element(address,chris,m,3u,2u,3u); }
     R.R1323 = g[4] * R_up.x + g[1] * R_up.y + g[7] * R_up.z + g[8] * R_up.w;
     for(var m=0u; m<4u; m++)
-        { R_up[m] = get_riemann_element(address,ch,m,1u,2u,3u); }
+        { R_up[m] = get_riemann_element(address,chris,m,1u,2u,3u); }
     R.R0123 = g[0] * R_up.x + g[4] * R_up.y + g[5] * R_up.z + g[6] * R_up.w;
     for(var m=0u; m<4u; m++)
-        { R_up[m] = get_riemann_element(address,ch,m,2u,1u,3u); }
+        { R_up[m] = get_riemann_element(address,chris,m,2u,1u,3u); }
     R.R0213 = g[0] * R_up.x + g[4] * R_up.y + g[5] * R_up.z + g[6] * R_up.w;
     return R;
 }
@@ -854,8 +802,8 @@ fn compute_weyl_squared(K: f32, Rc: MetricPoint, g_inv: MetricPoint, R_scalar: f
             var r_up_uv = 0.0;
             for (var a = 0u; a < 4u; a++) {
                 for (var b = 0u; b < 4u; b++) {
-                    let g_ua = extract_metric_element(g_inv, u, a);
-                    let g_vb = extract_metric_element(g_inv, v, b);
+                    let g_ua = g_inv[To_idx(u,a)];
+                    let g_vb = g_inv[To_idx(v,b)];
                     let r_ab = extract_ricci_matrix(Rc, a, b);
                     r_up_uv += g_ua * g_vb * r_ab;
                 }
@@ -978,10 +926,10 @@ fn phase3(@builtin(global_invocation_id) coords: vec3<u32>) {
     let k_past = get_metric(OLD, address, MOMENT);
     
     let i_past = get_metric(OLD, address, INVERZ);
-    let ch_center = load_christoffel_scratchpad(address);
+    let chris = load_christoffel_scratchpad(address);
     let T_em = compute_energy_momentum_tensor(g_past, k_past);
     set_metric(OLD, address, ENERGY, T_em);    
-    let R20_tensor  = compute_riemann_20(address, ch_center, g_past);
+    let R20_tensor  = compute_riemann_20(address, chris, g_past);
     let Rc_tensor = compute_ricci(R20_tensor, i_past);
     set_metric(OLD, address, RICCI, Rc_tensor);
     
@@ -1011,25 +959,29 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
     if ( address<0 ) { return; }
 
     var sponge_factor = 1.0;
-    let sponge_len = 4u;
-    let w = i32(dims.width); let h = i32(dims.height); let d = i32(dims.depth);
-    let dist_x = min(coords.x, u32(w - 1) - coords.x);
-    let dist_y = min(coords.y, u32(h - 1) - coords.y);
-    let dist_z = min(coords.z, u32(d - 1) - coords.z);
-    if (dist_x < sponge_len) {
-        sponge_factor = sponge_factor * f32(dist_x) / f32(sponge_len); 
-    }
-    if (dist_y < sponge_len) {
-        sponge_factor = sponge_factor * f32(dist_y) / f32(sponge_len); 
-    }
-    if (dist_z < sponge_len) {
-        sponge_factor = sponge_factor * f32(dist_z) / f32(sponge_len); 
-    }
-    let min_wall_dist = min(dist_x, min(dist_y, dist_z));
+    //let sponge_len = 4u;
+    //let w = i32(dims.width); let h = i32(dims.height); let d = i32(dims.depth);
+    //let dist_x = min(coords.x, u32(w - 1) - coords.x);
+    //let dist_y = min(coords.y, u32(h - 1) - coords.y);
+    //let dist_z = min(coords.z, u32(d - 1) - coords.z);
+    
+    
+    //if (dist_x < sponge_len) {
+    //    sponge_factor = sponge_factor * f32(dist_x) / f32(sponge_len); 
+    //}
+    //if (dist_y < sponge_len) {
+    //    sponge_factor = sponge_factor * f32(dist_y) / f32(sponge_len); 
+    //}
+    //if (dist_z < sponge_len) {
+    //    sponge_factor = sponge_factor * f32(dist_z) / f32(sponge_len); 
+    //}
+    
+    
     // Ha a rácspont a legszélső 6 cellán belül van, fokozatosan elnyeljük az energiát
-    //if (min_wall_dist < 6u) {
+    //let min_wall_dist = min(dist_x, min(dist_y, dist_z));
+    //if (min_wall_dist < sponge_len) {
     //    // 0.0 a legszélén (teljes fojtás), 1.0 a belső tiszta zónában
-    //    sponge_factor = f32(min_wall_dist) / 6.0; 
+    //    sponge_factor = f32(min_wall_dist) / f32(sponge_len); 
     //}
     let g_past    = get_metric(OLD, address, METRIC);
     let k_past    = get_metric(OLD, address, MOMENT);
@@ -1091,7 +1043,6 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
 
     }*/
 
-
     set_metric(NEW, address, MOMENT, k_next);
     set_metric(NEW, address, METRIC, g_past); // temporary    
     set_metric(NEW, address, INVERZ, T_em); // only for check in CPU
@@ -1111,29 +1062,29 @@ fn phase5(@builtin(global_invocation_id) id: vec3<u32>) {
     // Határellenőrzés a te check_idx függvényeddel
     let address = check_idx(id);
     if (address < 0) { return; }
-    
-    let adr_x_p = next_(address, 1, 0, 0);
-    let adr_x_m = next_(address,-1, 0, 0);
-    let adr_y_p = next_(address, 0, 1, 0);
-    let adr_y_m = next_(address, 0,-1, 0);
-    let adr_z_p = next_(address, 0, 0, 1);
-    let adr_z_m = next_(address, 0, 0,-1);
-    
     let k_past = get_metric(NEW, address, MOMENT);
-    let k_x_p  = get_metric(NEW, adr_x_p, MOMENT);
-    let k_x_m  = get_metric(NEW, adr_x_m, MOMENT);
-    let k_y_p  = get_metric(NEW, adr_y_p, MOMENT);
-    let k_y_m  = get_metric(NEW, adr_y_m, MOMENT);
-    let k_z_p  = get_metric(NEW, adr_z_p, MOMENT);
-    let k_z_m  = get_metric(NEW, adr_z_m, MOMENT);
-    
     let g_past = get_metric(NEW, address, METRIC);
-    let g_x_p  = get_metric(NEW, adr_x_p, METRIC);
-    let g_x_m  = get_metric(NEW, adr_x_m, METRIC);
-    let g_y_p  = get_metric(NEW, adr_y_p, METRIC);
-    let g_y_m  = get_metric(NEW, adr_y_m, METRIC);
-    let g_z_p  = get_metric(NEW, adr_z_p, METRIC);
-    let g_z_m  = get_metric(NEW, adr_z_m, METRIC);
+    
+    //let adr_x_p = next_(address, 1, 0, 0);
+    //let adr_x_m = next_(address,-1, 0, 0);
+    //let adr_y_p = next_(address, 0, 1, 0);
+    //let adr_y_m = next_(address, 0,-1, 0);
+    //let adr_z_p = next_(address, 0, 0, 1);
+    //let adr_z_m = next_(address, 0, 0,-1);
+    
+    //let k_x_p  = get_metric(NEW, adr_x_p, MOMENT);
+    //let k_x_m  = get_metric(NEW, adr_x_m, MOMENT);
+    //let k_y_p  = get_metric(NEW, adr_y_p, MOMENT);
+    //let k_y_m  = get_metric(NEW, adr_y_m, MOMENT);
+    //let k_z_p  = get_metric(NEW, adr_z_p, MOMENT);
+    //let k_z_m  = get_metric(NEW, adr_z_m, MOMENT);
+    
+    //let g_x_p  = get_metric(NEW, adr_x_p, METRIC);
+    //let g_x_m  = get_metric(NEW, adr_x_m, METRIC);
+    //let g_y_p  = get_metric(NEW, adr_y_p, METRIC);
+    //let g_y_m  = get_metric(NEW, adr_y_m, METRIC);
+    //let g_z_p  = get_metric(NEW, adr_z_p, METRIC);
+    //let g_z_m  = get_metric(NEW, adr_z_m, METRIC);
     
     let alpha = sqrt(max(1e-4, abs(g_past[0])));    
     let local_dt = dims.dt * alpha;
@@ -1142,12 +1093,12 @@ fn phase5(@builtin(global_invocation_id) id: vec3<u32>) {
     var g_next: MetricPoint;
     // EGYSÉGES, TELJES 10-ELEMŰ TENZORIÁLIS IDŐFEJLESZTÉS
     for (var r = 0u; r < 10u; r = r + 1u) {
-        let diff_k = (k_x_p[r] + k_x_m[r] + k_y_p[r] + k_y_m[r] + k_z_p[r] + k_z_m[r]) * (1.0/6.0) - k_past[r];
-        k_next[r] = k_past[r] + 0.002 * diff_k;
+        //let diff_k = (k_x_p[r] + k_x_m[r] + k_y_p[r] + k_y_m[r] + k_z_p[r] + k_z_m[r]) * (1.0/6.0) - k_past[r];
+        k_next[r] = k_past[r];// + 0.002 * diff_k;
 
         // Kinematikai időléptetés a metrikára
-        let diff_g = (g_x_p[r] + g_x_m[r] + g_y_p[r] + g_y_m[r] + g_z_p[r] + g_z_m[r]) * (1.0/6.0) - g_past[r];
-        var g = g_past[r] - local_dt * k_next[r] + 0.001 * diff_g;
+        //let diff_g = (g_x_p[r] + g_x_m[r] + g_y_p[r] + g_y_m[r] + g_z_p[r] + g_z_m[r]) * (1.0/6.0) - g_past[r];
+        var g = g_past[r] - local_dt * k_next[r];// + 0.001 * diff_g;
         //if (isInfNan(g)) {
         //    g = g_past[r];
         //}
