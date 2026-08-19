@@ -1063,22 +1063,39 @@ fn phase5(@builtin(global_invocation_id) id: vec3<u32>) {
     let address = check_idx(id);
     if (address < 0) { return; }
     let k_past = get_metric(NEW, address, MOMENT);
-    let g_past = get_metric(NEW, address, METRIC);
     
-    let adr_x_p = next_(address, 1, 0, 0);
-    let adr_x_m = next_(address,-1, 0, 0);
-    let adr_y_p = next_(address, 0, 1, 0);
-    let adr_y_m = next_(address, 0,-1, 0);
-    let adr_z_p = next_(address, 0, 0, 1);
-    let adr_z_m = next_(address, 0, 0,-1);
+    let adr_x_p = next(address, 1, 0, 0);
+    let adr_x_m = next(address,-1, 0, 0);
+    let adr_y_p = next(address, 0, 1, 0);
+    let adr_y_m = next(address, 0,-1, 0);
+    let adr_z_p = next(address, 0, 0, 1);
+    let adr_z_m = next(address, 0, 0,-1);
     var num = 0.0;
     var k_avr: MetricPoint;
-    if( adr_x_p >= 0 ) { let m = get_metric(NEW, adr_x_p, MOMENT); for( var r = 0u; r < 10u; r = r + 1u) { k_avr[r] = k_avr[r] + m[r]; } num = num + 1.0; }
-    if( adr_x_m >= 0 ) { let m = get_metric(NEW, adr_x_m, MOMENT); for( var r = 0u; r < 10u; r = r + 1u) { k_avr[r] = k_avr[r] + m[r]; } num = num + 1.0; }
-    if( adr_y_p >= 0 ) { let m = get_metric(NEW, adr_y_p, MOMENT); for( var r = 0u; r < 10u; r = r + 1u) { k_avr[r] = k_avr[r] + m[r]; } num = num + 1.0; }
-    if( adr_y_m >= 0 ) { let m = get_metric(NEW, adr_y_m, MOMENT); for( var r = 0u; r < 10u; r = r + 1u) { k_avr[r] = k_avr[r] + m[r]; } num = num + 1.0; }
-    if( adr_z_p >= 0 ) { let m = get_metric(NEW, adr_z_p, MOMENT); for( var r = 0u; r < 10u; r = r + 1u) { k_avr[r] = k_avr[r] + m[r]; } num = num + 1.0; }
-    if( adr_z_m >= 0 ) { let m = get_metric(NEW, adr_z_m, MOMENT); for( var r = 0u; r < 10u; r = r + 1u) { k_avr[r] = k_avr[r] + m[r]; } num = num + 1.0; }
+    if( adr_x_p >= 0 ) {
+        let m = get_metric(NEW, adr_x_p, MOMENT);
+        for( var r = 0u; r < 10u; r = r + 1u) { k_avr[r] = k_avr[r] + m[r]; }
+        num = num + 1.0; }
+    if( adr_x_m >= 0 ) {
+        let m = get_metric(NEW, adr_x_m, MOMENT);
+        for( var r = 0u; r < 10u; r = r + 1u) { k_avr[r] = k_avr[r] + m[r]; }
+        num = num + 1.0; }
+    if( adr_y_p >= 0 ) {
+        let m = get_metric(NEW, adr_y_p, MOMENT);
+        for( var r = 0u; r < 10u; r = r + 1u) { k_avr[r] = k_avr[r] + m[r]; }
+        num = num + 1.0; }
+    if( adr_y_m >= 0 ) {
+        let m = get_metric(NEW, adr_y_m, MOMENT);
+        for( var r = 0u; r < 10u; r = r + 1u) { k_avr[r] = k_avr[r] + m[r]; }
+        num = num + 1.0; }
+    if( adr_z_p >= 0 ) {
+        let m = get_metric(NEW, adr_z_p, MOMENT);
+        for( var r = 0u; r < 10u; r = r + 1u) { k_avr[r] = k_avr[r] + m[r]; }
+        num = num + 1.0; }
+    if( adr_z_m >= 0 ) {
+        let m = get_metric(NEW, adr_z_m, MOMENT);
+        for( var r = 0u; r < 10u; r = r + 1u) { k_avr[r] = k_avr[r] + m[r]; }
+        num = num + 1.0; }
     
     //let g_x_p  = get_metric(NEW, adr_x_p, METRIC);
     //let g_x_m  = get_metric(NEW, adr_x_m, METRIC);
@@ -1087,6 +1104,7 @@ fn phase5(@builtin(global_invocation_id) id: vec3<u32>) {
     //let g_z_p  = get_metric(NEW, adr_z_p, METRIC);
     //let g_z_m  = get_metric(NEW, adr_z_m, METRIC);
     
+    let g_past = get_metric(NEW, address, METRIC);
     let alpha = sqrt(max(1e-4, abs(g_past[0])));    
     let local_dt = dims.dt * alpha;
 
@@ -1095,7 +1113,7 @@ fn phase5(@builtin(global_invocation_id) id: vec3<u32>) {
     // EGYSÉGES, TELJES 10-ELEMŰ TENZORIÁLIS IDŐFEJLESZTÉS
     for (var r = 0u; r < 10u; r = r + 1u) {
         let diff_k = k_avr[r]/num - k_past[r];
-        k_next[r] = k_past[r] + 0.002 * diff_k;
+        k_next[r] = k_past[r] + 0.004 * diff_k;
 
         // Kinematikai időléptetés a metrikára
         //let diff_g = (g_x_p[r] + g_x_m[r] + g_y_p[r] + g_y_m[r] + g_z_p[r] + g_z_m[r]) * (1.0/6.0) - g_past[r];
