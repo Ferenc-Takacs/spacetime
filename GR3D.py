@@ -2,6 +2,7 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.text import Text
 from matplotlib.widgets import Slider, TextBox, Button
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from skimage import measure
@@ -17,7 +18,7 @@ filename = 'data_i19495_dx0.5000_m1.6_r10.csv'
 fields = ['k11','k22','k33']
 fields_text = "k11,k22,k33,";
 current_mode_title = "Skalármező"
-current_mode = 's' # s,sv,v,vs
+current_mode = 1 # 1,2,3,4,5
 
 df = None
 X, Y, Z = None, None, None
@@ -85,14 +86,13 @@ def load_and_process_data(fname="*", field_text="*"):
             fields_text = field_text
         
         # Logika alkalmazása a mezőszámok alapján
+        current_mode = len(fields)
         if len(fields) == 1:
-            current_mode_title = f"Skalármező Felület: '{fields[0]}'"
-            current_mode = 's'
+            current_mode_title = f"Skalármező felület: '{fields[0]}'"
             Phi = clean_and_shape_3d(df[fields[0]].values, KVAL_CUT, apply_abs_filter=True)
 
-        elif len(fields) == 2:
+        elif len(fields) == 2: # skalármező gradiense
             current_mode_title = f"Skalármező + Gradiens: '{fields[0]}'"
-            current_mode = 'sv'
             Phi = clean_and_shape_3d(df[fields[0]].values, KVAL_CUT, apply_abs_filter=True)
             grad_x, grad_y, grad_z = np.gradient(Phi)
             U = -grad_x
@@ -100,11 +100,10 @@ def load_and_process_data(fname="*", field_text="*"):
             W = -grad_z
             vlen_raw = np.sqrt(U**2 + V**2 + W**2)
             A = clean_and_shape_3d(vlen_raw, KVAL_CUT, apply_abs_filter=True)
-            print(f"grad len: {float(A.max())}")
+            #print(f"grad len: {float(A.max())}")
 
         elif len(fields) == 3:
             current_mode_title = f"Vektormező {fields[0]},{fields[1]},{fields[2]})"
-            current_mode = 'v'
             U = clean_and_shape_3d(df[fields[0]].values, KVAL_CUT)
             V = clean_and_shape_3d(df[fields[1]].values, KVAL_CUT)
             W = clean_and_shape_3d(df[fields[2]].values, KVAL_CUT)
@@ -112,8 +111,15 @@ def load_and_process_data(fname="*", field_text="*"):
             Phi = clean_and_shape_3d(vlen_raw, KVAL_CUT, apply_abs_filter=True)
 
         elif len(fields) == 4:
-            current_mode_title = f"Vektormező + felület: {fields[0]},{fields[1]},{fields[2]}"
-            current_mode = 'vs'
+            current_mode_title = f"Vektormező + Felület: {fields[0]},{fields[1]},{fields[2]}"
+            U = clean_and_shape_3d(df[fields[0]].values, KVAL_CUT)
+            V = clean_and_shape_3d(df[fields[1]].values, KVAL_CUT)
+            W = clean_and_shape_3d(df[fields[2]].values, KVAL_CUT)
+            vlen_raw = np.sqrt(df[fields[0]].values**2 + df[fields[1]].values**2 + df[fields[2]].values**2)
+            Phi = clean_and_shape_3d(vlen_raw, KVAL_CUT, apply_abs_filter=True)
+
+        elif len(fields) == 5:
+            current_mode_title = f"Felület vektormezőből: {fields[0]},{fields[1]},{fields[2]}"
             U = clean_and_shape_3d(df[fields[0]].values, KVAL_CUT)
             V = clean_and_shape_3d(df[fields[1]].values, KVAL_CUT)
             W = clean_and_shape_3d(df[fields[2]].values, KVAL_CUT)
@@ -134,9 +140,10 @@ if not load_and_process_data( fname=filename, field_text=fields_text):
 init_level1 = phi_min + (phi_max - phi_min) * 0.35
 init_level2 = phi_min + (phi_max - phi_min) * 0.65
 
-fig = plt.figure(figsize=(12, 9))
-plt.subplots_adjust(bottom=0.32)  # Megemelt alsó margó a sok vezérlőnek
+fig = plt.figure(figsize=(10,10))
+plt.subplots_adjust(bottom=0.28)  # Megemelt alsó margó a sok vezérlőnek
 ax = fig.add_subplot(111, projection='3d')
+ax.set_box_aspect([1, 1, 1])
 
 
 def draw_surfaces_with_normals(level1, level2):
@@ -152,7 +159,7 @@ def draw_surfaces_with_normals(level1, level2):
             z_r = np.interp(verts[:, 2], np.arange(X.shape[2]), Z[0, 0, :])
             scaled_verts = np.column_stack((x_r, y_r, z_r))
 
-            if current_mode != 'v' : # surface
+            if current_mode != 3 : # surface
                 mesh = Poly3DCollection(scaled_verts[faces])
                 mesh.set_facecolor(face_color);
                 mesh.set_edgecolor(edge_color)
@@ -160,7 +167,7 @@ def draw_surfaces_with_normals(level1, level2):
                 mesh.set_linewidth(0.05)
                 ax.add_collection3d(mesh)
             
-            if current_mode != 's' : # vectors
+            if current_mode != 1 and current_mode != 5 : # vectors
                 step = 20
                 face_centers = scaled_verts[faces[::step]].mean(axis=1)
                 ix = np.clip(np.interp(face_centers[:, 0], X[:, 0, 0], np.arange(X.shape[0])).astype(int), 0, X.shape[0]-1)
@@ -168,7 +175,7 @@ def draw_surfaces_with_normals(level1, level2):
                 iz = np.clip(np.interp(face_centers[:, 2], Z[0, 0, :], np.arange(X.shape[2])).astype(int), 0, Z.shape[2]-1)
                 ax.quiver(face_centers[:, 0], face_centers[:, 1], face_centers[:, 2],
                       U[ix, iy, iz], V[ix, iy, iz], W[ix, iy, iz],
-                      length= 1.8 * level / (phi_max-phi_min) + 1.2, normalize=True, color=edge_color, alpha=0.8, linewidth=1) # 
+                      length= 1.8 * level / (phi_max-phi_min) + 1.2, normalize=True, color=edge_color, alpha=0.7, linewidth=1) # 
         except (ValueError, RuntimeError):
             pass
 
@@ -182,10 +189,10 @@ def draw_surfaces_with_normals(level1, level2):
     
 draw_surfaces_with_normals(init_level1, init_level2)
 
-ax_phi1 = plt.axes([0.25, 0.22, 0.6, 0.03])
-ax_phi2 = plt.axes([0.25, 0.16, 0.6, 0.03])
-ax_fields_box = plt.axes([0.25, 0.09, 0.6, 0.04])
-ax_file_btn = plt.axes([0.25, 0.03, 0.6, 0.04]) # Új gomb pozíciója a régi mező helyén
+ax_phi1 = plt.axes([0.25, 0.16, 0.6, 0.02])
+ax_phi2 = plt.axes([0.25, 0.12, 0.6, 0.02])
+ax_fields_box = plt.axes([0.25, 0.08, 0.6, 0.03])
+ax_file_btn = plt.axes([0.25, 0.04, 0.6, 0.03]) # Új gomb pozíciója a régi mező helyén
 
 s_phi1 = Slider(ax_phi1, 'Kék szint ($\Phi_1$)', phi_min, phi_max, valinit=init_level1, dragging=False, color='royalblue')
 s_phi2 = Slider(ax_phi2, 'Narancs szint ($\Phi_2$)', phi_min, phi_max, valinit=init_level2, dragging=False, color='darkorange')
