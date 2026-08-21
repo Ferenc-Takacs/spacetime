@@ -1011,8 +1011,8 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
         // lefojtja azt, és a megmaradó energiát átirányítja a szabad, nulla értékű helyekre!
         let complementer_tension = g_past[r] * R_scalar - ricci[r];
         // 2. LÉPÉS: Az anizotróp tértágulási forrás (phi) helyi, irányított felépítése
-        // A gamma=2 és delta=2/3 kétlépcsős kalibráció, szorozva a Planck-négyzettel (ami itt 1.0)
-        let local_phi = 2.0 * K_scalar + (2.0 / 3.0) * C2_scalar;        
+        // A gamma=2/3 és delta=3/2 kétlépcsős kalibráció, szorozva a Planck-négyzettel (ami itt 1.0)
+        let local_phi = (2.0 / 3.0) * K_scalar + (3.0 / 2.0) * C2_scalar;
         // 3. LÉPÉS: A javított, golyóálló Forrás-tag felírása
         // A lambda-tag most már nem szorozza vakon a meglévő csúcsot, hanem az 
         // új complementer_tension operátoron keresztül a szabad irányokat pumpálja!
@@ -1025,23 +1025,6 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
         //}
         k_next[r] = k;
     }
-    /*for (var r = 0u; r < 10u; r = r + 1u) {
-        // Az egyenleted szerinti pontos forrás-tag, ahol a tenzortényezők 
-        // egymásra hatása (stabilization_factor) közvetlenül irányítja a Ricci-t!
-        let source_term = stabilization_factor * (T_em[r] + 0.5 * R_scalar * g_past[r]) - ricci[r];
-        // Euler-időléptetés a momentumra
-        var k = (k_past[r] + local_dt * source_term) * sponge_factor;
-        //if (isInfNan(k)) {
-        //    k = k_past[r];
-        //}
-        k_next[r] = k;
-        
-        // Kinematikai időléptetés a metrikára
-        //g_next[r] = g_past[r] - local_dt * k_next[r];
-        //let diff = (p_x_p[r] + p_x_m[r] + p_y_p[r] + p_y_m[r] + p_z_p[r] + p_z_m[r]) * (1.0/6.0) - g_past[r];
-        //g_next[r] = g_next[r] + 0.003 * diff;
-
-    }*/
 
     set_metric(NEW, address, MOMENT, k_next);
     set_metric(NEW, address, METRIC, g_past); // temporary    
@@ -1112,7 +1095,7 @@ fn phase5(@builtin(global_invocation_id) id: vec3<u32>) {
     var g_next: MetricPoint;
     // EGYSÉGES, TELJES 10-ELEMŰ TENZORIÁLIS IDŐFEJLESZTÉS
     for (var r = 0u; r < 10u; r = r + 1u) {
-        let diff_k = k_avr[r]/num - k_past[r];
+        let diff_k = (k_avr[r]/num - k_past[r])*(7.0-num);
         k_next[r] = k_past[r] + 0.004 * diff_k;
 
         // Kinematikai időléptetés a metrikára

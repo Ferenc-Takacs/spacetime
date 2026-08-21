@@ -370,7 +370,7 @@ struct SpacetimeApp {
     pub min_val: f32,
     pub max_val: f32,
     pub is_running_gpu: bool,
-    //pub steps_per_frame: i32,
+    pub last_save: u32,
 
     pub is_recording: bool,
     pub waiting_for_screenshot: bool,
@@ -405,7 +405,7 @@ impl SpacetimeApp {
             min_val: 0.0,
             max_val: 0.0,
             is_running_gpu: false,
-            //steps_per_frame: 1,
+            last_save: 0,
             
             is_recording: false,
             waiting_for_screenshot: false,
@@ -515,7 +515,45 @@ impl SpacetimeApp {
             egui::TextureOptions::NEAREST, // Tiszta, pixeles rácsmegjelenítés elmosás nélkül
         ));
     }
-    
+    fn save_cvs(&self) {
+        use std::fs::File;
+        use std::io::{Write, BufWriter};
+
+        let width = self.grid.width as i32;
+        let height = self.grid.height as i32;
+        let depth = self.grid.depth as i32;
+        let filename = format!(
+            "data_i{}_dx{:.4}_m{}_r{}.csv",
+            self.dims_data.step_index, self.dims_data.dx, self.grid.m, self.grid.r0
+        );
+        if let Ok(file) = File::create(&filename) {
+            let mut writer = BufWriter::new(file);
+            let head = "x,y,z,g00,g11,g22,g33,g01,g02,g03,g12,g13,g23,k00,k11,k22,k33,k01,k02,k03,k12,k13,k23,T00,T11,T22,T33,T01,T02,T03,T12,T13,T23,R00,R11,R22,R33,R01,R02,R03,R12,R13,R23,R,K,C2,Lambda,E11,E22,E12,|E|,B11,B22,B12,|B|\n";
+            let _ = writer.write_all(head.as_bytes());
+            for z in 0..self.grid.depth {
+                for y in 0..self.grid.height {
+                    for x in 0..self.grid.width {
+                        let idx_1d = (x + (y * self.grid.width) + (z * self.grid.width * self.grid.height)) as usize;
+                        let gr = &self.grid.data[idx_1d];
+                        let cx = x as i32 - width / 2;
+                        let cy = y as i32 - height / 2;
+                        let cz = z as i32 - depth / 2;
+                        let mut row_string = format!("{},{},{},", cx, cy, cz);
+                        for i in 0..52 {
+                            if i == 51 {
+                                row_string += &format!("{}\n", gr.data[i]);
+                            } else {
+                                row_string += &format!("{},", gr.data[i]);
+                            }
+                        }
+                        let _ = writer.write_all(row_string.as_bytes());
+                    }
+                }
+            }
+            let _ = writer.flush();
+            println!("A szimulációs adatok sikeresen kimentve a '{}' fájlba!", filename);
+        }
+    }
 }
 
 impl eframe::App for SpacetimeApp {
@@ -637,7 +675,11 @@ impl eframe::App for SpacetimeApp {
                 // AUTOMATIKUS MEGHÍVÁS: Ha fut a szimuláció, minden frame-en végrehajtunk egy időlépést
                 if self.is_running_gpu || press_once {
                     if !self.gpu_in_progress {
-                        if let Some(interface_arc) = &self.gpu_interface {                    
+                        if self.last_save + 10000 <= self.dims_data.step_index {
+                            self.last_save = self.dims_data.step_index;
+                            self.save_cvs();
+                        }
+                        if let Some(interface_arc) = &self.gpu_interface {
                             self.gpu_in_progress = true; // Zároljuk a felületet az újabb indítások ellen
                             if let Ok(mut interface) = interface_arc.lock() {
                                 interface.copy_dims(self.dims_data);
@@ -681,43 +723,8 @@ impl eframe::App for SpacetimeApp {
                 }
                 
                 if !self.is_running_gpu && ui.button("Save data (csv)").clicked() {
-                    use std::fs::File;
-                    use std::io::{Write, BufWriter};
-
-                    let width = self.grid.width as i32;
-                    let height = self.grid.height as i32;
-                    let depth = self.grid.depth as i32;
-                    let filename = format!(
-                        "data_i{}_dx{:.4}_m{}_r{}.csv",
-                        self.dims_data.step_index, self.dims_data.dx, self.grid.m, self.grid.r0
-                    );
-                    if let Ok(file) = File::create(&filename) {
-                        let mut writer = BufWriter::new(file);
-                        let head = "x,y,z,g00,g11,g22,g33,g01,g02,g03,g12,g13,g23,k00,k11,k22,k33,k01,k02,k03,k12,k13,k23,T00,T11,T22,T33,T01,T02,T03,T12,T13,T23,R00,R11,R22,R33,R01,R02,R03,R12,R13,R23,R,K,C2,Lambda,E11,E22,E12,|E|,B11,B22,B12,|B|\n";
-                        let _ = writer.write_all(head.as_bytes());
-                        for z in 0..self.grid.depth {
-                            for y in 0..self.grid.height {
-                                for x in 0..self.grid.width {
-                                    let idx_1d = (x + (y * self.grid.width) + (z * self.grid.width * self.grid.height)) as usize;
-                                    let gr = &self.grid.data[idx_1d];
-                                    let cx = x as i32 - width / 2;
-                                    let cy = y as i32 - height / 2;
-                                    let cz = z as i32 - depth / 2;
-                                    let mut row_string = format!("{},{},{},", cx, cy, cz);
-                                    for i in 0..52 {
-                                        if i == 51 {
-                                            row_string += &format!("{}\n", gr.data[i]);
-                                        } else {
-                                            row_string += &format!("{},", gr.data[i]);
-                                        }
-                                    }
-                                    let _ = writer.write_all(row_string.as_bytes());
-                                }
-                            }
-                        }
-                        let _ = writer.flush();
-                        println!("A szimulációs adatok sikeresen kimentve a '{}' fájlba!", filename);
-                    }
+                    self.save_cvs();
+                    self.last_save = self.dims_data.step_index;
                 }
                 
                 if !self.is_running_gpu && ui.button("Load data (csv)").clicked() {
@@ -772,6 +779,9 @@ impl eframe::App for SpacetimeApp {
                                         } else { ok = false; break; }
                                     } else { ok = false;  break; }
                                 } else { ok = false;  break; }
+                            }
+                            if ok {
+                                self.last_save = self.dims_data.step_index;
                             }
                             if ok && let Some(interface_arc) = &self.gpu_interface {                    
                                 if let Ok(mut interface) = interface_arc.lock() {
