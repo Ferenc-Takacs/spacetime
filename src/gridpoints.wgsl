@@ -1096,7 +1096,7 @@ fn phase5(@builtin(global_invocation_id) id: vec3<u32>) {
     // EGYSÉGES, TELJES 10-ELEMŰ TENZORIÁLIS IDŐFEJLESZTÉS
     for (var r = 0u; r < 10u; r = r + 1u) {
         let diff_k = (k_avr[r]/num - k_past[r])*(7.0-num);
-        k_next[r] = k_past[r] + 0.004 * diff_k;
+        k_next[r] = k_past[r] + 0.008 * diff_k;
 
         // Kinematikai időléptetés a metrikára
         //let diff_g = (g_x_p[r] + g_x_m[r] + g_y_p[r] + g_y_m[r] + g_z_p[r] + g_z_m[r]) * (1.0/6.0) - g_past[r];
