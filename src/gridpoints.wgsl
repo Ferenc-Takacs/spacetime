@@ -990,10 +990,13 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
 
     let R_scalar  = get_scalar(NEW, address, R_SCALAR);
     let K_scalar  = get_scalar(NEW, address, K_SCALAR) * sponge_factor;;
-    let C2_scalar = get_scalar(NEW, address, C2_SCALAR) * sponge_factor;;
+    var C2_scalar = get_scalar(NEW, address, C2_SCALAR) * sponge_factor;;
+    if (C2_scalar > 150.0) {
+        C2_scalar = 150.0;
+    }
     
-    let ell_P_negyzet = 1.0;
-    let phi = 2.0 * ell_P_negyzet * (K_scalar + (1.0 / 3.0) * C2_scalar);
+    let ell_P_negyzet = 0.01;
+    let phi = ell_P_negyzet * ((2.0 / 3.0) * K_scalar + (3.0 / 2.0) * C2_scalar);
     // Stabilizáló konformis osztófaktor a tenzortényezők egymásra hatásából
     let stabilization_factor = 1.0 / (1.0 + phi);
 
@@ -1006,19 +1009,25 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
     // EGYSÉGES, TELJES 10-ELEMŰ TENZORIÁLIS IDŐFEJLESZTÉS
     // EGYSÉGES, TELJES 10-ELEMŰ TENZORIÁLIS IDŐFEJLESZTÉS
     for (var r = 0u; r < 10u; r = r + 1u) {        
+        let systematic_distribution = g_past[r] - (ricci[r] / (abs(R_scalar) + 1e-4));        
+        let source_term = stabilization_factor * T_em[r] + (local_dt * phi) * systematic_distribution;
+        
         // 1. LÉPÉS: A komplementer feszültség-kapcsoló kiszámítása pontról pontra.
         // Ha az adott irányban (pl. ricci[r]) már túl nagy a feszültség, ez a tag 
         // lefojtja azt, és a megmaradó energiát átirányítja a szabad, nulla értékű helyekre!
-        let complementer_tension = g_past[r] * R_scalar - ricci[r];
+        //let complementer_tension = g_past[r] * R_scalar - ricci[r];
+        
         // 2. LÉPÉS: Az anizotróp tértágulási forrás (phi) helyi, irányított felépítése
         // A gamma=2/3 és delta=3/2 kétlépcsős kalibráció, szorozva a Planck-négyzettel (ami itt 1.0)
-        let local_phi = (2.0 / 3.0) * K_scalar + (3.0 / 2.0) * C2_scalar;
+        //let local_phi = ell_P_negyzet * (2.0 / 3.0) * K_scalar + (3.0 / 2.0) * C2_scalar;
         // 3. LÉPÉS: A javított, golyóálló Forrás-tag felírása
         // A lambda-tag most már nem szorozza vakon a meglévő csúcsot, hanem az 
         // új complementer_tension operátoron keresztül a szabad irányokat pumpálja!
-        let source_term = T_em[r] + local_phi * complementer_tension - ricci[r];
+        //let source_term = T_em[r] + phi * complementer_tension - ricci[r];        
+        
+        let source_term_capped = clamp(source_term, -30.0, 30.0);
         // Euler-időléptetés a momentumra
-        var k = (k_past[r] + local_dt * source_term);// * sponge_factor;
+        var k = (k_past[r] + local_dt * source_term_capped);// * sponge_factor;
         // Túlcsordulás és NaN elleni szoftveres védőgát feloldása
         //if (isInfNan(k)) {
         //    k = k_past[r] * 0.5; // Ha instabillá válna, finoman visszahúzzuk a rácsot

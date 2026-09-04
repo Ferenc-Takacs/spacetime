@@ -428,7 +428,7 @@ impl SpacetimeApp {
                 for y in 0..height {
                     for x in 0..width {
                         let idx_1d = x + (y * width) + (z * width * height);
-                        for d in 0..52 {
+                        for d in 0..44 { // az E, és B nincs vizsgálva
                             let val = self.grid.data[idx_1d].data[d];
                             if !val.is_finite() {
                                 self.is_running_gpu = false;
@@ -522,7 +522,7 @@ impl SpacetimeApp {
         let width = self.grid.width as i32;
         let height = self.grid.height as i32;
         let depth = self.grid.depth as i32;
-        let filename = format!(
+        let mut filename = format!(
             "data_i{}_dx{:.4}_m{}_r{}.csv",
             self.dims_data.step_index, self.dims_data.dx, self.grid.m, self.grid.r0
         );
@@ -552,6 +552,35 @@ impl SpacetimeApp {
             }
             let _ = writer.flush();
             println!("A szimulációs adatok sikeresen kimentve a '{}' fájlba!", filename);
+        }
+        filename = filename + ".mm";
+        if let Ok(file) = File::create(&filename) {
+            let mut writer = BufWriter::new(file);
+            let _ = writer.write_all(("# file: ".to_owned()+&filename+"\n# var[ minimum; maximum ]\n").as_bytes());
+            let varnames =  ["g00","g11","g22","g33","g01","g02","g03","g12","g13","g23","k00","k11","k22","k33","k01","k02","k03","k12","k13","k23","T00","T11","T22","T33","T01","T02","T03","T12","T13","T23","R00","R11","R22","R33","R01","R02","R03","R12","R13","R23","R","K","C2","Lambda","E11","E22","E12","|E|","B11","B22","B12","|B|"];
+            for offset in 0..52 {
+                let mut current_min = f32::MAX;
+                let mut current_max = f32::MIN;
+                let mut inf = false;
+                for z in 0..self.grid.depth {
+                    for y in 0..self.grid.height {
+                        for x in 0..self.grid.width {
+                            let idx_1d = (x + (y * self.grid.width) + (z * self.grid.width * self.grid.height)) as usize;
+                            let val = self.grid.data[idx_1d].data[offset];
+                            if val.is_finite() {
+                                if val < current_min { current_min = val; }
+                                if val > current_max { current_max = val; }
+                            }
+                            else {
+                                inf = true;
+                            }
+                        }
+                    }
+                }
+                let row_string = format!("{}[ {}; {}{}]\n", varnames[offset], current_min, current_max, if inf {", inf "} else {" "});
+                let _ = writer.write_all(row_string.as_bytes());
+            }
+            let _ = writer.flush();
         }
     }
 }
@@ -675,7 +704,7 @@ impl eframe::App for SpacetimeApp {
                 // AUTOMATIKUS MEGHÍVÁS: Ha fut a szimuláció, minden frame-en végrehajtunk egy időlépést
                 if self.is_running_gpu || press_once {
                     if !self.gpu_in_progress {
-                        if self.last_save + 10000 <= self.dims_data.step_index {
+                        if (self.dims_data.step_index % 10000) == 0 && self.dims_data.step_index != self.last_save {
                             self.last_save = self.dims_data.step_index;
                             self.save_cvs();
                         }
@@ -785,7 +814,7 @@ impl eframe::App for SpacetimeApp {
                             }
                             if ok && let Some(interface_arc) = &self.gpu_interface {                    
                                 if let Ok(mut interface) = interface_arc.lock() {
-                                    println!("A szimulációs adatok sikeresen visszaolvasva");
+                                    println!("A szimulációs adatok sikeresen visszaolvasva {} fájlból",filename.display());
                                     interface.write_buffer(&self.grid.data);
                                     interface.copy_dims(self.dims_data);
                                 } else { ok = false; }

@@ -14,7 +14,13 @@ N = 53
 KVAL_CUT = 0
 MAX_ABS_PHI = 5.0
 
-filename = 'data_i19495_dx0.5000_m1.6_r10.csv'
+filename = filedialog.askopenfilename(
+    title="Válassz ki egy adatsort (53x53x53 CSV)",
+    filetypes=[("CSV fájlok", "*.csv"), ("Minden fájl", "*.*")]
+)
+if filename == '' :
+    exit()
+
 fields = ['k11','k22','k33']
 fields_text = "k11,k22,k33,";
 current_mode_title = "Skalármező"
