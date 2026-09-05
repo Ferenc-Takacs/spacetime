@@ -15,7 +15,7 @@ filename = filedialog.askopenfilename(
 if filename == '' :
     exit()
 df = pd.read_csv(filename, comment='#')
-printf(filename)
+print(filename)
 
 writer = PillowWriter(fps=10)
 
@@ -39,11 +39,9 @@ r_min = np.min(r)
 r_max = np.max(r)
 t_min = np.min(t)
 t_max = np.max(t)
-s_max = max( (r_min + 0.002) * (1.0 + t_min), (r_max + 0.002) * (1.0 + t_max) )
-if s_max > 1e-30:
-    auto_scale = 1.5 / s_max
-else:
-    auto_scale = 1.0
+s_max = max( (abs(r_min) + 0.002) * (1.0 + abs(t_min)), (abs(r_max) + 0.002) * (1.0 + abs(t_max)) ) * max_speed
+auto_scale = np.power(100000000000.0 / s_max, 1/5)
+print(f"speed :{max_speed} s_max: {s_max} scale: {auto_scale}")
 
 # Rács hálózat rekonstruálása az áramvonalakhoz
 xi = np.unique(x_szelet)
@@ -139,12 +137,9 @@ for frame in range(anim_range):
         py[i] = y2
         pz[i] = z2
         
-        wave_pulsation = 1.0 #np.cos((px[i]*2.0 + py[i]*2.0 + pz[i]*2.0) - (frame * 0.4))
-        alpha_factor = 0.4 + 0.4 * wave_pulsation
         distance_to_cam = np.sqrt((x1 - cam_x)**2 + (y1 - cam_y)**2 + (z1 - cam_z)**2)        
         depth_alpha = 1.0 - (distance_to_cam - 15.0) / 45.0
-        depth_alpha = min(1.0, max(0.1, depth_alpha))
-        alpha_factor = alpha_factor * depth_alpha
+        alpha_factor = min(1.0, max(0.1, depth_alpha))
         color_intensity = min(1.0, max(0.1, local_C / 0.33))
         line_color = (color_intensity, 1.0 - color_intensity, 1.0) 
 
@@ -235,5 +230,5 @@ kockak_kepei[0].save(
 )
 
 plt.close()
-print("Siker! A 'spacetime_vortex.webp' elkészült és tökéletesen animál!")
+print(f"Siker! A '{filename}.webp' elkészült.")
 
