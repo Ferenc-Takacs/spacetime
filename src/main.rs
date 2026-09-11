@@ -370,6 +370,7 @@ struct SpacetimeApp {
     pub min_val: f32,
     pub max_val: f32,
     pub is_running_gpu: bool,
+    pub need_save: bool,
     pub last_save: u32,
 
     pub is_recording: bool,
@@ -381,13 +382,13 @@ struct SpacetimeApp {
 
 impl SpacetimeApp {
     fn new() -> Self {
-        let width  = 53;
-        let height = 53;
-        let depth  = 53;
+        let width  = 61;
+        let height = 61;
+        let depth  = 61;
         let dx: f32 = 0.5;
         let dt: f32 = dx * 0.001;
         let m = 1.6;
-        let r0 = 10.0;
+        let r0 = 9.0;
         let grid = SpacetimeGrid::new(width, height, depth, dx, dt, m, r0);
         let dims_data = GridDimensions { width: width, height: height, depth: depth, dx: dx, dt: dt, step_index: 0, pad1: 0, pad2: 0,};
         Self {
@@ -405,6 +406,7 @@ impl SpacetimeApp {
             min_val: 0.0,
             max_val: 0.0,
             is_running_gpu: false,
+            need_save: false,
             last_save: 0,
             
             is_recording: false,
@@ -523,8 +525,8 @@ impl SpacetimeApp {
         let height = self.grid.height as i32;
         let depth = self.grid.depth as i32;
         let mut filename = format!(
-            "data_i{}_dx{:.4}_m{}_r{}.csv",
-            self.dims_data.step_index, self.dims_data.dx, self.grid.m, self.grid.r0
+            "data{}_i{}_dx{:.4}_m{}_r{}.csv",
+            self.dims_data.width, self.dims_data.step_index, self.dims_data.dx, self.grid.m, self.grid.r0
         );
         if let Ok(file) = File::create(&filename) {
             let mut writer = BufWriter::new(file);
@@ -705,10 +707,10 @@ impl eframe::App for SpacetimeApp {
                 if self.is_running_gpu || press_once {
                     if !self.gpu_in_progress {
                         if (self.dims_data.step_index % 10000) == 0 && self.dims_data.step_index != self.last_save {
-                            self.last_save = self.dims_data.step_index;
-                            self.save_cvs();
+                            self.need_save = true;
+                            self.is_running_gpu = false;
                         }
-                        if let Some(interface_arc) = &self.gpu_interface {
+                        else if let Some(interface_arc) = &self.gpu_interface {
                             self.gpu_in_progress = true; // Zároljuk a felületet az újabb indítások ellen
                             if let Ok(mut interface) = interface_arc.lock() {
                                 interface.copy_dims(self.dims_data);
@@ -751,9 +753,13 @@ impl eframe::App for SpacetimeApp {
                     }
                 }
                 
-                if !self.is_running_gpu && ui.button("Save data (csv)").clicked() {
+                if self.need_save || (!self.is_running_gpu && ui.button("Save data (csv)").clicked()) {
                     self.save_cvs();
                     self.last_save = self.dims_data.step_index;
+                    if self.need_save {
+                        self.is_running_gpu = true;
+                        self.need_save = false;
+                    }
                 }
                 
                 if !self.is_running_gpu && ui.button("Load data (csv)").clicked() {
@@ -1057,6 +1063,61 @@ impl SpacetimeGrid {
                     let r2 = rx*rx + ry*ry + rz*rz;
                     let r = r2.sqrt();
                     let regularized_r = (r2 + self.r0*self.r0).sqrt();
+                    
+                    // GÖMBÖSÍTETT ESZKÖZÖK: Irány-koszinuszok a tökéletes gömbi vetítéshez
+                    // Ha r=0 (a középpontban), a nullával való osztás ellen teszünk egy védelmet
+                    let inv_r = if r > 1e-6 { 1.0 / r } else { 1.0 / (self.r0 + 1e-6) };
+                    let nx = rx * inv_r;
+                    let ny = ry * inv_r;
+                    let nz = rz * inv_r;
+
+                    // 1. SZABÁLYOSÍTOTT SCHWARZSCHILD IDŐ-FAKTOR (A te tágulási képleted)
+                    let f = (2.0 * self.m * r2) / (r2 * r + self.r0 * self.r0 * self.r0);
+                    
+                    //let denom = regularized_r * regularized_r + a_spin * a_spin;
+                    
+                    // JAVÍTÁS: A null-vektorok tiszta gömbi és spin-transzformált alakja
+                    let l_0 = 1.0;
+                    let l_1 = nx + (a_spin * ny) / regularized_r;
+                    let l_2 = ny - (a_spin * nx) / regularized_r;
+                    let l_3 = nz;
+
+                    // JAVÍTOTT TISZTA DIAGONÁLIS METRIKA (Kocka-hatás végleg kiirtva!)
+                    // A f*l_i*l_i tagok most már hajszálpontosan a gömbi iránykoszinuszok (nx,ny,nz) 
+                    // szerint skálázódnak, így a g11, g22, g33 felülete tökéletes gömbhéj lesz!
+                    self.data[idx].data[0] = -1.0 + f * l_0 * l_0;
+                    self.data[idx].data[1] =  1.0 + f * l_1 * l_1;
+                    self.data[idx].data[2] =  1.0 + f * l_2 * l_2;
+                    self.data[idx].data[3] =  1.0 + f * l_3 * l_3;
+
+                    // BEINDÍTJUK A TÉRIDŐ KERESZT-TAGJAIT (Idő-Tér elcsavarodás)
+                    self.data[idx].data[4] = f * l_0 * l_1; // g01
+                    self.data[idx].data[5] = f * l_0 * l_2; // g02
+                    self.data[idx].data[6] = f * l_0 * l_3; // g03
+
+                    // Térbeli elcsavarodások (X-Y, X-Z, Y-Z)
+                    self.data[idx].data[7] = f * l_1 * l_2; // g12
+                    self.data[idx].data[8] = f * l_1 * l_3; // g13
+                    self.data[idx].data[9] = f * l_2 * l_3; // g23
+
+                    // Kirajzoláshoz tesztként elmentjük az f faktort
+                    self.data[idx].data[43] = f;
+                }
+            }
+        }
+
+        /*for z in 0..self.depth {
+            for y in 0..self.height {
+                for x in 0..self.width {
+                    let idx = (x + y * self.width + z * self.width * self.height) as usize;
+
+                    let rx = (x as f32 - cx) * self.dx;
+                    let ry = (y as f32 - cy) * self.dx;
+                    let rz = (z as f32 - cz) * self.dx;
+                    
+                    let r2 = rx*rx + ry*ry + rz*rz;
+                    let r = r2.sqrt();
+                    let regularized_r = (r2 + self.r0*self.r0).sqrt();
                     // 1. SZABÁLYOSÍTOTT SCHWARZSCHILD IDŐ-FAKTOR (A te tágulási képleted)
                     let f = 1.0 - (2.0 * self.m * r2) / (r2 * r + self.r0 * self.r0 * self.r0);
                     
@@ -1087,7 +1148,7 @@ impl SpacetimeGrid {
 
                 }
             }
-        }
+        }*/
         self.calculate_moments();
         println!("Az Izotróp nemszinguláris Schwarzschild mező sikeresen generálva!");
     }

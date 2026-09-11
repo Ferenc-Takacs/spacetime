@@ -21,8 +21,8 @@ filename = filedialog.askopenfilename(
 if filename == '' :
     exit()
 
-fields = ['k11','k22','k33']
-fields_text = "k11,k22,k33,";
+fields = ['g01','g02','g03']
+fields_text = "g01,g02,g03,";
 current_mode_title = "Skalármező"
 current_mode = 1 # 1,2,3,4,5
 
@@ -53,7 +53,6 @@ def clean_and_shape_3d(raw_vector, KVAL_CUT, apply_abs_filter=False, coord=False
 def load_and_process_data(fname="*", field_text="*"):
         global df, X, Y, Z, Phi, U, V, W, min_x, max_x, min_y, max_y, min_z, max_z, phi_min, phi_max, current_mode, current_mode_title, filename, fields, fields_text
 
-##    try:
         if fname != "*" :
             if not os.path.exists(fname):
                 print(f"HIBA: A(z) '{fname}' fájl nem létezik a mappában!")
@@ -135,9 +134,6 @@ def load_and_process_data(fname="*", field_text="*"):
         phi_min, phi_max = float(Phi.min()), float(Phi.max())
 
         return True
-##    except Exception as e:
-##        print(f"Váratlan hiba a fájl beolvasásakor: {e}") #nem írja a hiba helyét
-##        return False
 
 if not load_and_process_data( fname=filename, field_text=fields_text):
     print("Kritikus hiba: Az indítófájl nem tölthető be. Kérlek ellenőrizd a {filename} meglétét.")
