@@ -80,7 +80,15 @@ while True :
 #            dynamic_factor = local_R * (1.0 + local_g00) * auto_scale
 #            dynamic_factor = np.power(np.abs(dynamic_factor), (1/5)) * np.sign(dynamic_factor)
 
-    buborek_maszk = (np.abs(R) > r_abs_max * 0.8 )
+    if r_min < 0 :
+        buborek_maszk_m = ( R < np.percentile(R, 5) ) & ( R < 0 )
+        buborek_maszk_p = []
+    elif r_max > 0 :
+        buborek_maszk_m = []
+        buborek_maszk_p = ( R > np.percentile(R, 95) ) & ( R > 0)
+    else :
+        buborek_maszk_m = ( R < np.percentile(R, 5) ) & ( R < 0 )
+        buborek_maszk_p = ( R > np.percentile(R, 95) ) & ( R > 0)
 
     # 2. LÉPÉS: Az animációs ablak előkészítése
     fig = plt.figure(figsize=(10, 10))
@@ -165,8 +173,10 @@ while True :
         cam_x = np.cos(rad) * 30.0
         cam_y = np.sin(rad) * 30.0
         cam_z = np.sin(np.radians(25.0)) * 30.0
-        if np.any(buborek_maszk):
-            ax.scatter(x_szelet[buborek_maszk], y_szelet[buborek_maszk], z_szelet[buborek_maszk], color='purple', alpha=0.8, s=3, depthshade=True)
+        if np.any(buborek_maszk_m):
+            ax.scatter(x_szelet[buborek_maszk_m], y_szelet[buborek_maszk_m], z_szelet[buborek_maszk_m], color='orange', alpha=0.4, s=3, depthshade=True)
+        if np.any(buborek_maszk_p):
+            ax.scatter(x_szelet[buborek_maszk_p], y_szelet[buborek_maszk_p], z_szelet[buborek_maszk_p], color='purple', alpha=0.4, s=3, depthshade=True)
 
         for i in range(num_particles):
             x_n, y_n, z_n = px[i], py[i], pz[i]
