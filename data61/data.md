@@ -1,5 +1,5 @@
 Means:
-Saved data files: (too large to upload)
+Saved data files: (too large to upload, may be zip)
     data[side-size]\_i[iteration-steps]\_dx[derivation-space-step]\_m[mass]\_r[schwarzschild-radius].csv
 Files with minimum-maximum-values:
     data[side-size]\_i[iteration-steps]\_dx[derivation-space-step]\_m[mass]\_r[schwarzschild-radius].csv.mm
