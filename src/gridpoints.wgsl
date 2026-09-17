@@ -49,7 +49,7 @@ const ENERGY: i32 = 40;
 const R_SCALAR  = 40;
 const K_SCALAR  = 41;
 const C2_SCALAR = 42;
-const BRACKETS  = 43;
+const PHI       = 43;
 const E_11      = 44;
 const E_22      = 45;
 const E_12      = 46; //(Elektromos nyírás)
@@ -1040,7 +1040,7 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
     set_metric(NEW, address, INVERZ, T_em); // only for check in CPU
     set_metric(NEW, address, RICCI, ricci); // only for check in CPU
     
-    set_scalar(NEW, address, BRACKETS, stabilization_factor); // only for check in CPU
+    set_scalar(NEW, address, PHI, phi); // only for check in CPU
 
 }
 // ==========================================

@@ -49,310 +49,6 @@ fn main() -> eframe::Result<()> {
 }
 
 
-struct GpuInterface {
-    pub io_buffer_size: u64,
-    pub compute_pipeline_1: wgpu::ComputePipeline,
-    pub compute_pipeline_2: wgpu::ComputePipeline,
-    pub compute_pipeline_3: wgpu::ComputePipeline,
-    pub compute_pipeline_4: wgpu::ComputePipeline,
-    pub compute_pipeline_5: wgpu::ComputePipeline,
-    pub bind_group: wgpu::BindGroup,
-    pub dims_buffer: wgpu::Buffer,
-    pub buffer_a: wgpu::Buffer,
-    #[allow(unused)]
-    pub buffer_b: wgpu::Buffer,
-    pub staging_buffer: wgpu::Buffer,
-    pub device: Arc<wgpu::Device>,
-    pub queue: Arc<wgpu::Queue>,
-    pub dims_data: GridDimensions,
-    pub buffer_data: Vec<MetricPoints>,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct GridDimensions {
-    width: u32,
-    height: u32,
-    depth: u32,
-    dx: f32,
-    dt: f32,
-    step_index: u32,
-    pad1: u32,
-    pad2: u32,
-}
-
-
-impl GpuInterface {
-    
-    fn init(render_state: &egui_wgpu::RenderState, app: &SpacetimeApp) -> Option<Self> {
-        
-        let limits = render_state.adapter.limits();
-        if limits.max_storage_buffers_per_shader_stage  < 4 {
-            eprintln!("Hiba: A GPU nem támogatja a Storage Texture-öket (VirtualBox/régi driver).");
-            return None;
-        }
-
-        let device = render_state.device.clone();
-        let queue = render_state.queue.clone();
-        println!("limits.max_storage_buffers_per_shader_stage : {:?}",limits.max_storage_buffers_per_shader_stage );
-
-        let dims_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Grid Dimensions Uniform Buffer"),
-            size: std::mem::size_of::<GridDimensions>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        queue.write_buffer(&dims_buffer, 0, bytemuck::bytes_of(&app.dims_data));
-
-        // Shader és Pipeline felépítése
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Spacetime Curvature Shader"),
-            source: wgpu::ShaderSource::Wgsl(WGSL_CODE.into()),
-        });
-        println!("Shader OK");
-
-
-
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Spacetime Group Layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None, },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-        let grid_size = (app.grid.width * app.grid.height * app.grid.depth) as u64;
-        let bytes_per_point = 52*4; //std::mem::size_of::<MetricPoints>() as u64; // 52 darab f32 pontonként
-        let io_buffer_size = grid_size * bytes_per_point;
-
-        let buffer_a = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Spacetime Storage Buffer A"),
-            size: io_buffer_size,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
-
-        let buffer_b = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Spacetime Storage Buffer B"),
-            size: io_buffer_size,
-            usage: wgpu::BufferUsages::STORAGE,// | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
-
-        let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Staging Buffer"),
-            size: io_buffer_size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        
-        let buffer_data = vec![MetricPoints::zeroed(); grid_size as usize];
-
-        queue.write_buffer(&buffer_a, 0, bytemuck::cast_slice(&app.grid.data));
-
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Bind Group"),
-            layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: dims_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: buffer_a.as_entire_binding() }, // Múlt (read_write)
-                wgpu::BindGroupEntry { binding: 2, resource: buffer_b.as_entire_binding() }, // Jövő (read_write)
-            ],
-        });
-
-        
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Compute Pipeline Layout"),
-            bind_group_layouts: &[&bind_group_layout],
-            //bind_group_layouts: &[Some(&bind_group_layout)], // for v0.35
-            //immediate_size: 0, // v0.35 kompatibilis mező // for v0.35
-            push_constant_ranges: &[], // for v0.33
-        });
-
-        let compute_pipeline_1 = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Spacetime Compute Pipeline 1"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: Some("phase1"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-
-        let compute_pipeline_2 = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Spacetime Compute Pipeline 1"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: Some("phase2"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-
-        let compute_pipeline_3 = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Spacetime Compute Pipeline 1"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: Some("phase3"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-
-        let compute_pipeline_4 = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Spacetime Compute Pipeline 1"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: Some("phase4"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-
-        let compute_pipeline_5 = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Spacetime Compute Pipeline 1"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: Some("phase5"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-        Some(Self{
-            io_buffer_size: io_buffer_size,
-            compute_pipeline_1: compute_pipeline_1,
-            compute_pipeline_2: compute_pipeline_2,
-            compute_pipeline_3: compute_pipeline_3,
-            compute_pipeline_4: compute_pipeline_4,
-            compute_pipeline_5: compute_pipeline_5,
-            bind_group: bind_group,
-            dims_buffer: dims_buffer,
-            buffer_a: buffer_a,
-            buffer_b: buffer_b,
-            staging_buffer: staging_buffer,
-            device: device.into(),
-            queue: queue.into(),
-            dims_data: app.dims_data,
-            buffer_data: buffer_data,
-        })
-    }
-    
-    fn copy_dims(&mut self, dims: GridDimensions) {
-        self.dims_data = dims;
-    }
-
-    fn get_dims(&self, dims: & mut GridDimensions) {
-        *dims = self.dims_data.clone();
-    }
-
-    fn get_buffer(&self, grid_data: &mut Vec<MetricPoints>) {
-        *grid_data = self.buffer_data.clone();
-        //println!("{}", self.buffer_data.len());
-    }
-
-    fn write_buffer(&mut self, grid_data: &Vec<MetricPoints>) {
-        self.buffer_data = grid_data.clone();
-        self.queue.write_buffer(&self.buffer_a, 0, bytemuck::cast_slice(&self.buffer_data));
-    }
-    
-    fn run_one_simulation_step( &mut self) {
-
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Spacetime Command Encoder"),
-        });
-
-        // @compute @workgroup_size(4, 4, 4)
-        let workgroups_x = (self.dims_data.width + 3) / 4;
-        let workgroups_y = (self.dims_data.height + 3) / 4;
-        let workgroups_z = (self.dims_data.depth + 3) / 4;
-        
-        self.queue.write_buffer(&self.dims_buffer, 0, bytemuck::bytes_of(&self.dims_data));
-        
-        {
-            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Spacetime Compute Pass"),
-                timestamp_writes: None,
-            });
-            
-            compute_pass.set_bind_group(0, &self.bind_group, &[]);
-
-            compute_pass.set_pipeline(&self.compute_pipeline_1);
-            compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
-
-            compute_pass.set_pipeline(&self.compute_pipeline_2);
-            compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
-
-            compute_pass.set_pipeline(&self.compute_pipeline_3);
-            compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
-
-            compute_pass.set_pipeline(&self.compute_pipeline_4);                        
-            compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
-
-            compute_pass.set_pipeline(&self.compute_pipeline_5);                        
-            compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
-            
-            self.dims_data.step_index += 1;
-        }
-
-        //let staging_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-        //    label: Some("Staging Buffer"),
-        //    size: self.io_buffer_size,
-        //    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        //    mapped_at_creation: false,
-        //});
-        encoder.copy_buffer_to_buffer( &self.buffer_a, 0, &self.staging_buffer, 0, self.io_buffer_size );
-
-        //self.queue.submit(Some(encoder.finish()));
-        self.queue.submit(std::iter::once(encoder.finish()));
-
-        let total_f32_elements = (self.dims_data.width * self.dims_data.height * self.dims_data.depth) as usize * 52;
-        let mut local_data_copy = vec![0.0f32; total_f32_elements];
-        
-        let buffer_slice = self.staging_buffer.slice(..);
-        let (sender, receiver) = std::sync::mpsc::channel();
-        buffer_slice.map_async(wgpu::MapMode::Read, move |v| { let _ = sender.send(v);});
-        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
-        if let Ok(Ok(())) = receiver.try_recv() {
-            {
-                let data_view = buffer_slice.get_mapped_range();
-                let result_data: &[f32] = bytemuck::cast_slice(&data_view);
-                local_data_copy.copy_from_slice(result_data);
-                drop(data_view);
-            }
-        }
-        else {
-            println!("Hiba: A GPU nem tudta megfelelően feltérképezni a memóriát!");
-        }
-        self.staging_buffer.unmap();
-
-        let mut src_f32_idx = 0;
-        for p in &mut self.buffer_data {
-            p.data.copy_from_slice(&local_data_copy[src_f32_idx..src_f32_idx + 52]);
-            src_f32_idx += 52;
-        }
-    }
-    
-}
-
 
 struct SpacetimeApp {
     pub grid: SpacetimeGrid,
@@ -530,7 +226,7 @@ impl SpacetimeApp {
         );
         if let Ok(file) = File::create(&filename) {
             let mut writer = BufWriter::new(file);
-            let head = "x,y,z,g00,g11,g22,g33,g01,g02,g03,g12,g13,g23,k00,k11,k22,k33,k01,k02,k03,k12,k13,k23,T00,T11,T22,T33,T01,T02,T03,T12,T13,T23,R00,R11,R22,R33,R01,R02,R03,R12,R13,R23,R,K,C2,Lambda,E11,E22,E12,|E|,B11,B22,B12,|B|\n";
+            let head = "x,y,z,g00,g11,g22,g33,g01,g02,g03,g12,g13,g23,k00,k11,k22,k33,k01,k02,k03,k12,k13,k23,T00,T11,T22,T33,T01,T02,T03,T12,T13,T23,R00,R11,R22,R33,R01,R02,R03,R12,R13,R23,R,K,C2,Phi,E11,E22,E12,|E|,B11,B22,B12,|B|\n";
             let _ = writer.write_all(head.as_bytes());
             for z in 0..self.grid.depth {
                 for y in 0..self.grid.height {
@@ -559,7 +255,7 @@ impl SpacetimeApp {
         if let Ok(file) = File::create(&filename) {
             let mut writer = BufWriter::new(file);
             let _ = writer.write_all(("# file: ".to_owned()+&filename+"\n# var[ minimum; maximum ]\n").as_bytes());
-            let varnames =  ["g00","g11","g22","g33","g01","g02","g03","g12","g13","g23","k00","k11","k22","k33","k01","k02","k03","k12","k13","k23","T00","T11","T22","T33","T01","T02","T03","T12","T13","T23","R00","R11","R22","R33","R01","R02","R03","R12","R13","R23","R","K","C2","Lambda","E11","E22","E12","|E|","B11","B22","B12","|B|"];
+            let varnames =  ["g00","g11","g22","g33","g01","g02","g03","g12","g13","g23","k00","k11","k22","k33","k01","k02","k03","k12","k13","k23","T00","T11","T22","T33","T01","T02","T03","T12","T13","T23","R00","R11","R22","R33","R01","R02","R03","R12","R13","R23","R","K","C2","Phi","E11","E22","E12","|E|","B11","B22","B12","|B|"];
             for offset in 0..52 {
                 let mut current_min = f32::MAX;
                 let mut current_max = f32::MIN;
@@ -974,7 +670,7 @@ impl eframe::App for SpacetimeApp {
                                 if ui.radio_value(&mut self.selected_scalar, 40, "Ricci Skalár (R)").changed() { redraw = true; }
                                 if ui.radio_value(&mut self.selected_scalar, 41, "Kretschmann (K)").changed() { redraw = true; }
                                 if ui.radio_value(&mut self.selected_scalar, 42, "Weyl-négyzet (C²)").changed() { redraw = true; }
-                                if ui.radio_value(&mut self.selected_scalar, 43, "Gravity tension").changed() { redraw = true; }
+                                if ui.radio_value(&mut self.selected_scalar, 43, "Phi").changed() { redraw = true; }
                             });
                             ui.vertical(|ui| {
                                 if ui.radio_value(&mut self.selected_scalar, 44, "E.11").changed() { redraw = true; }
@@ -1015,6 +711,312 @@ impl eframe::App for SpacetimeApp {
         });
     }
 }
+
+struct GpuInterface {
+    pub io_buffer_size: u64,
+    pub compute_pipeline_1: wgpu::ComputePipeline,
+    pub compute_pipeline_2: wgpu::ComputePipeline,
+    pub compute_pipeline_3: wgpu::ComputePipeline,
+    pub compute_pipeline_4: wgpu::ComputePipeline,
+    pub compute_pipeline_5: wgpu::ComputePipeline,
+    pub bind_group: wgpu::BindGroup,
+    pub dims_buffer: wgpu::Buffer,
+    pub buffer_a: wgpu::Buffer,
+    #[allow(unused)]
+    pub buffer_b: wgpu::Buffer,
+    pub staging_buffer: wgpu::Buffer,
+    pub device: Arc<wgpu::Device>,
+    pub queue: Arc<wgpu::Queue>,
+    pub dims_data: GridDimensions,
+    pub buffer_data: Vec<MetricPoints>,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct GridDimensions {
+    width: u32,
+    height: u32,
+    depth: u32,
+    dx: f32,
+    dt: f32,
+    step_index: u32,
+    pad1: u32,
+    pad2: u32,
+}
+
+
+impl GpuInterface {
+    
+    fn init(render_state: &egui_wgpu::RenderState, app: &SpacetimeApp) -> Option<Self> {
+        
+        let limits = render_state.adapter.limits();
+        if limits.max_storage_buffers_per_shader_stage  < 4 {
+            eprintln!("Hiba: A GPU nem támogatja a Storage Texture-öket (VirtualBox/régi driver).");
+            return None;
+        }
+
+        let device = render_state.device.clone();
+        let queue = render_state.queue.clone();
+        println!("limits.max_storage_buffers_per_shader_stage : {:?}",limits.max_storage_buffers_per_shader_stage );
+
+        let dims_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Grid Dimensions Uniform Buffer"),
+            size: std::mem::size_of::<GridDimensions>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&dims_buffer, 0, bytemuck::bytes_of(&app.dims_data));
+
+        // Shader és Pipeline felépítése
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Spacetime Curvature Shader"),
+            source: wgpu::ShaderSource::Wgsl(WGSL_CODE.into()),
+        });
+        println!("Shader OK");
+
+
+
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Spacetime Group Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None, },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let grid_size = (app.grid.width * app.grid.height * app.grid.depth) as u64;
+        let bytes_per_point = 52*4; //std::mem::size_of::<MetricPoints>() as u64; // 52 darab f32 pontonként
+        let io_buffer_size = grid_size * bytes_per_point;
+
+        let buffer_a = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Spacetime Storage Buffer A"),
+            size: io_buffer_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let buffer_b = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Spacetime Storage Buffer B"),
+            size: io_buffer_size,
+            usage: wgpu::BufferUsages::STORAGE,// | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Staging Buffer"),
+            size: io_buffer_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        
+        let buffer_data = vec![MetricPoints::zeroed(); grid_size as usize];
+
+        queue.write_buffer(&buffer_a, 0, bytemuck::cast_slice(&app.grid.data));
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Bind Group"),
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: dims_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: buffer_a.as_entire_binding() }, // Múlt (read_write)
+                wgpu::BindGroupEntry { binding: 2, resource: buffer_b.as_entire_binding() }, // Jövő (read_write)
+            ],
+        });
+
+        
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Compute Pipeline Layout"),
+            bind_group_layouts: &[&bind_group_layout],
+            //bind_group_layouts: &[Some(&bind_group_layout)], // for v0.35
+            //immediate_size: 0, // v0.35 kompatibilis mező // for v0.35
+            push_constant_ranges: &[], // for v0.33
+        });
+
+        let compute_pipeline_1 = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Spacetime Compute Pipeline 1"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: Some("phase1"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+
+        let compute_pipeline_2 = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Spacetime Compute Pipeline 1"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: Some("phase2"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+
+        let compute_pipeline_3 = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Spacetime Compute Pipeline 1"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: Some("phase3"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+
+        let compute_pipeline_4 = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Spacetime Compute Pipeline 1"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: Some("phase4"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+
+        let compute_pipeline_5 = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Spacetime Compute Pipeline 1"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: Some("phase5"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        Some(Self{
+            io_buffer_size: io_buffer_size,
+            compute_pipeline_1: compute_pipeline_1,
+            compute_pipeline_2: compute_pipeline_2,
+            compute_pipeline_3: compute_pipeline_3,
+            compute_pipeline_4: compute_pipeline_4,
+            compute_pipeline_5: compute_pipeline_5,
+            bind_group: bind_group,
+            dims_buffer: dims_buffer,
+            buffer_a: buffer_a,
+            buffer_b: buffer_b,
+            staging_buffer: staging_buffer,
+            device: device.into(),
+            queue: queue.into(),
+            dims_data: app.dims_data,
+            buffer_data: buffer_data,
+        })
+    }
+    
+    fn copy_dims(&mut self, dims: GridDimensions) {
+        self.dims_data = dims;
+    }
+
+    fn get_dims(&self, dims: & mut GridDimensions) {
+        *dims = self.dims_data.clone();
+    }
+
+    fn get_buffer(&self, grid_data: &mut Vec<MetricPoints>) {
+        *grid_data = self.buffer_data.clone();
+        //println!("{}", self.buffer_data.len());
+    }
+
+    fn write_buffer(&mut self, grid_data: &Vec<MetricPoints>) {
+        self.buffer_data = grid_data.clone();
+        self.queue.write_buffer(&self.buffer_a, 0, bytemuck::cast_slice(&self.buffer_data));
+    }
+    
+    fn run_one_simulation_step( &mut self) {
+
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Spacetime Command Encoder"),
+        });
+
+        // @compute @workgroup_size(4, 4, 4)
+        let workgroups_x = (self.dims_data.width + 3) / 4;
+        let workgroups_y = (self.dims_data.height + 3) / 4;
+        let workgroups_z = (self.dims_data.depth + 3) / 4;
+        
+        self.queue.write_buffer(&self.dims_buffer, 0, bytemuck::bytes_of(&self.dims_data));
+        
+        {
+            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Spacetime Compute Pass"),
+                timestamp_writes: None,
+            });
+            
+            compute_pass.set_bind_group(0, &self.bind_group, &[]);
+
+            compute_pass.set_pipeline(&self.compute_pipeline_1);
+            compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+
+            compute_pass.set_pipeline(&self.compute_pipeline_2);
+            compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+
+            compute_pass.set_pipeline(&self.compute_pipeline_3);
+            compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+
+            compute_pass.set_pipeline(&self.compute_pipeline_4);                        
+            compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+
+            compute_pass.set_pipeline(&self.compute_pipeline_5);                        
+            compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+            
+            self.dims_data.step_index += 1;
+        }
+
+        //let staging_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+        //    label: Some("Staging Buffer"),
+        //    size: self.io_buffer_size,
+        //    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        //    mapped_at_creation: false,
+        //});
+        encoder.copy_buffer_to_buffer( &self.buffer_a, 0, &self.staging_buffer, 0, self.io_buffer_size );
+
+        //self.queue.submit(Some(encoder.finish()));
+        self.queue.submit(std::iter::once(encoder.finish()));
+
+        let total_f32_elements = (self.dims_data.width * self.dims_data.height * self.dims_data.depth) as usize * 52;
+        let mut local_data_copy = vec![0.0f32; total_f32_elements];
+        
+        let buffer_slice = self.staging_buffer.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        buffer_slice.map_async(wgpu::MapMode::Read, move |v| { let _ = sender.send(v);});
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+        if let Ok(Ok(())) = receiver.try_recv() {
+            {
+                let data_view = buffer_slice.get_mapped_range();
+                let result_data: &[f32] = bytemuck::cast_slice(&data_view);
+                local_data_copy.copy_from_slice(result_data);
+                drop(data_view);
+            }
+        }
+        else {
+            println!("Hiba: A GPU nem tudta megfelelően feltérképezni a memóriát!");
+        }
+        self.staging_buffer.unmap();
+
+        let mut src_f32_idx = 0;
+        for p in &mut self.buffer_data {
+            p.data.copy_from_slice(&local_data_copy[src_f32_idx..src_f32_idx + 52]);
+            src_f32_idx += 52;
+        }
+    }
+    
+}
+
+
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]

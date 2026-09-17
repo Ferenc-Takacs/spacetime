@@ -55,9 +55,9 @@ while True :
     U   = clean_and_shape_3d(df['g01'].values)
     V   = clean_and_shape_3d(df['g02'].values)
     W   = clean_and_shape_3d(df['g03'].values)
-    #G12 = clean_and_shape_3d(df['g12'].values)
-    #G13 = clean_and_shape_3d(df['g13'].values)
-    #G23 = clean_and_shape_3d(df['g23'].values)
+    G12 = clean_and_shape_3d(df['g12'].values)
+    G13 = clean_and_shape_3d(df['g13'].values)
+    G23 = clean_and_shape_3d(df['g23'].values)
     speed = np.sqrt(U**2 + V**2 + W**2)
     #SPEED = speed.reshape(N, N, N)
 
@@ -65,7 +65,6 @@ while True :
     yi = np.unique(y_szelet)
     zi = np.unique(z_szelet)
     X, Y, Z = np.meshgrid(xi, yi, zi)
-
 
     max_speed = np.max(speed)
     r_min = np.min(R)
@@ -76,26 +75,19 @@ while True :
     s_max = r_abs_max * max_speed  * (1.0 + t_max)
     auto_scale = np.power(1000000000000.0 / s_max, 1/5)
     print(f"speed :{max_speed} s_max: {s_max} scale: {auto_scale}")
-#            if np.abs(local_R) < 0.003 : local_R = 0.002 * np.sign(local_R)
-#            dynamic_factor = local_R * (1.0 + local_g00) * auto_scale
-#            dynamic_factor = np.power(np.abs(dynamic_factor), (1/5)) * np.sign(dynamic_factor)
+    scale_factor = 0.75
+    last_rate = 0.0
 
+    buborek_maszk_m = np.zeros_like(R, dtype=bool)
+    buborek_maszk_p = np.zeros_like(R, dtype=bool)
     if r_min < 0 :
-        buborek_maszk_m = ( R < np.percentile(R, 5) ) & ( R < 0 )
-        buborek_maszk_p = []
-    elif r_max > 0 :
-        buborek_maszk_m = []
-        buborek_maszk_p = ( R > np.percentile(R, 95) ) & ( R > 0)
-    else :
-        buborek_maszk_m = ( R < np.percentile(R, 5) ) & ( R < 0 )
-        buborek_maszk_p = ( R > np.percentile(R, 95) ) & ( R > 0)
-
-    # 2. LÉPÉS: Az animációs ablak előkészítése
-    fig = plt.figure(figsize=(10, 10))
-    ax = fig.add_subplot(111, projection='3d')
-    fig.patch.set_facecolor('black')
-    ax.set_proj_type('persp', focal_length=0.2) # Bekapcsolja a valós 3D perspektívát!
-    ax.set_facecolor('black')
+        Rm = R[ R < 0]
+        if len(Rm) > 0:
+            buborek_maszk_m = ( R <= np.percentile(Rm, 1) ) & ( R < 0 )
+    if r_max > 0 :
+        Rp = R[ R > 0]
+        if len(Rp) > 0:
+            buborek_maszk_p = ( R >= np.percentile(Rp, 99) ) & ( R > 0 )
 
     x_min, x_max = xi.min(), xi.max()
     y_min, y_max = yi.min(), yi.max()
@@ -106,148 +98,153 @@ while True :
     px_orig = np.random.uniform(x_min, x_max, num_particles)
     py_orig = np.random.uniform(y_min, y_max, num_particles)
     pz_orig = np.random.uniform(z_min, z_max, num_particles)
-    px = np.copy(px_orig)
-    py = np.copy(py_orig)
-    pz = np.copy(pz_orig)
+    np.set_printoptions(precision=3, suppress=True)
+    watch_part = 111
 
-    #print(x_min, x_max, y_min, y_max, z_min, z_max)
-    for frame in range(90):
-        ok = 0
-        bad = 0
+    anim_range = 360
+    warm_range = 180 # must bigger as 8 and smaler as anim_range
+    
+    # Eltároljuk a 360 képkockára az összes részecske 7 fázisú uszály-koordinátáját és színét
+    hist_x = np.zeros((num_particles, 6))
+    hist_y = np.zeros((num_particles, 6))
+    hist_z = np.zeros((num_particles, 6))
+    hist_v = np.zeros((num_particles), dtype=int)
+
+    for i in range(num_particles):
+        hist_x[i, 5] = px_orig[i]
+        hist_y[i, 5] = py_orig[i]
+        hist_z[i, 5] = pz_orig[i]
+
+    fig = plt.figure(figsize=(10, 10))
+    ax = fig.add_subplot(111, projection='3d')
+    fig.patch.set_facecolor('black')
+    ax.set_proj_type('persp', focal_length=0.2) # Bekapcsolja a valós 3D perspektívát!
+    ax.set_facecolor('black')
+    
+
+    last_watch_end = anim_range + warm_range
+
+    for frame in range(0, anim_range + warm_range):
+        
+        if frame >= warm_range :
+            ax.clear()
+            ax.set_facecolor('black')
+            ax.grid(False)
+            ax.xaxis.pane.fill = ax.yaxis.pane.fill = ax.zaxis.pane.fill = False
+            ax.set_axis_off()
+            camera_angle = ((frame-warm_range) / anim_range) * 360.0
+            ax.view_init(elev=35.0, azim=camera_angle)
+            # 1. Először kirajzoljuk a fix pontfelhőket, a kockát, és elvégezzük az első renderelést
+            if np.any(buborek_maszk_m):
+                ax.scatter(x_szelet[buborek_maszk_m], y_szelet[buborek_maszk_m], z_szelet[buborek_maszk_m], color='gold', alpha=0.4, s=9, depthshade=True)
+            if np.any(buborek_maszk_p):
+                ax.scatter(x_szelet[buborek_maszk_p], y_szelet[buborek_maszk_p], z_szelet[buborek_maszk_p], color='magenta', alpha=0.4, s=9, depthshade=True)
+            # Kockaváz rajzolása a háttérbe
+            ax.plot([x_min, x_max, x_max, x_min, x_min, x_min, x_max, x_max, x_min, x_min, x_min],
+                    [y_min, y_min, y_max, y_max, y_min, y_min, y_min, y_max, y_max, y_min, y_min],
+                    [z_min, z_min, z_min, z_min, z_min, z_max, z_max, z_max, z_max, z_max, z_max], color='white', linewidth=0.5, alpha=0.5)
+            ax.plot([x_min, x_min], [y_max, y_max], [z_min, z_max], color='white', linewidth=0.5, alpha=0.5)
+            ax.plot([x_max, x_max], [y_min, y_min], [z_min, z_max], color='white', linewidth=0.5, alpha=0.5)
+            ax.plot([x_max, x_max], [y_max, y_max], [z_min, z_max], color='white', linewidth=1.0, alpha=0.8)
+            
+        long = 0
+        num = 0
         for i in range(num_particles):
-            x_n, y_n, z_n = px[i], py[i], pz[i]
-            ix = np.abs(xi - x_n).argmin()
-            iy = np.abs(yi - y_n).argmin()
-            iz = np.abs(zi - z_n).argmin()
-            local_u   = U[iz, iy, ix]
-            local_v   = V[iz, iy, ix]
-            local_w   = W[iz, iy, ix]
-            local_R   = R[iz, iy, ix]
-            local_C   = C[iz, iy, ix]
-            local_g00 = T[iz, iy, ix]
-            u_eff = local_u #+ (local_g12 * local_v) + (local_g13 * local_w)
-            v_eff = local_v #- (local_g12 * local_u) + (local_g23 * local_w)
-            w_eff = local_w #- (local_g13 * local_u) - (local_g23 * local_v)
-            if np.abs(local_R) < 0.003 : local_R = 0.002 * np.sign(local_R)
+            hist_x_i = hist_x[i]
+            hist_y_i = hist_y[i]
+            hist_z_i = hist_z[i]
+            x_prev = hist_x_i[5]
+            y_prev = hist_y_i[5]
+            z_prev = hist_z_i[5]
+            v_prev = hist_v[i]
+            for j in range(5) :
+                jj = j+1
+                hist_x_i[j] = hist_x_i[jj]
+                hist_y_i[j] = hist_y_i[jj]
+                hist_z_i[j] = hist_z_i[jj]
+            end = False
+            ix, iy, iz = np.abs(xi - x_prev).argmin(), np.abs(yi - y_prev).argmin(), np.abs(zi - z_prev).argmin()
+            local_u, local_v, local_w = U[iz, iy, ix], V[iz, iy, ix], W[iz, iy, ix]
+            local_R, local_g00 = R[iz, iy, ix], T[iz, iy, ix]
+            if np.abs(local_R) < 0.002 : local_R = 0.002 * np.sign(local_R)
             dynamic_factor = local_R * (1.0 + local_g00) * auto_scale
             dynamic_factor = np.power(np.abs(dynamic_factor), (1/5)) * np.sign(dynamic_factor)
-            local_dx = u_eff * dynamic_factor
-            local_dy = v_eff * dynamic_factor
-            local_dz = w_eff * dynamic_factor
-            x_n = x_n - local_dx
-            y_n = y_n - local_dy
-            z_n = z_n - local_dz
-            v_mag = np.sqrt(local_dx**2 + local_dy**2 + local_dz**2)
-            #print(v_mag)
-            if  x_n < x_min or x_n > x_max or y_n < y_min or y_n > y_max or z_n < z_min or z_n > z_max or v_mag < 0.2:
-                px[i] = px_orig[i]
-                py[i] = py_orig[i]
-                pz[i] = pz_orig[i]
-                bad = bad + 1
+            x_next = x_prev - local_u * dynamic_factor
+            y_next = y_prev - local_v * dynamic_factor
+            z_next = z_prev - local_w * dynamic_factor
+            v_next = v_prev + 1 if v_prev < 5 else 5
+            first = 5-v_next
+            v_mag = np.sqrt((x_next-hist_x_i[first])**2 + (y_next-hist_y_i[first])**2 + (z_next-hist_z_i[first])**2) / v_next
+            out = x_next < x_min or x_next > x_max or y_next < y_min or y_next > y_max or z_next < z_min or z_next > z_max
+            if out or v_mag < 0.1:
+                hist_x_i[5] = px_orig[i]
+                hist_y_i[5] = py_orig[i]
+                hist_z_i[5] = pz_orig[i]
+                hist_v[i] = 0
+                if not out :
+                    long = long + v_mag
+                    num = num + 1
+                end = True
+                #if watch_part == i :
+                #    last_watch_end = frame
+            else:
+                hist_v[i] = v_next
+                hist_x_i[5] = x_next
+                hist_y_i[5] = y_next
+                hist_z_i[5] = z_next
+                long = long + v_mag
+                num = num + 1
+            if frame >= warm_range :
+                local_g12, local_g13, local_g23 = G12[iz, iy, ix], G13[iz, iy, ix], G23[iz, iy, ix]
+                shear_intensity = np.power(local_g12**2 + local_g13**2 + local_g23**2, 1/3)
+                color_phase = min(1.0, max(0.0, shear_intensity))
+                line_color = (0.1 + 0.9 * color_phase, 0.8 - 0.7 * color_phase, 1.0)
+                if v_next == 5 and not end:
+                    ax.plot(hist_x_i, hist_y_i, hist_z_i, color=line_color, linewidth=0.9, alpha=0.6)
+                else :
+                    last = 5 if end else 6
+                    xd = hist_x_i[first:last]
+                    yd = hist_y_i[first:last]
+                    zd = hist_z_i[first:last]
+                    ax.plot(xd, yd, zd, color=line_color, linewidth=0.9, alpha=0.6)
+                    if v_next < 4 :
+                        last = 5 - v_next
+                        xd = hist_x_i[:last]
+                        yd = hist_y_i[:last]
+                        zd = hist_z_i[:last]
+                        ax.plot(xd, yd, zd, color=line_color, linewidth=0.9, alpha=0.6)
+            #else :
+                #if watch_part == i :
+                #    print(f"nx: {x_next}, ny: {y_next}, nz: {z_next}, long: {v_mag}, out:{out}")
+                #    print(f"x:{hist_x_i}, y:{hist_y_i}, z:{hist_z_i}, valid:{hist_v[i]} {end} {last_watch_end}")
+
+        if frame < warm_range :
+            if num != 0 :
+                long = long / num
+                ch = ''
+                if long > 1 :
+                    auto_scale = auto_scale / long
+                    ch = '/'
+                if long < 0.25 :
+                    auto_scale = auto_scale / ( long * 4 )
+                    ch = '*'
+                print(f"warm: {frame} factor: {scale_factor} scale{ch}: {auto_scale} long: {long} num:{num}")
             else :
-                px[i] = x_n
-                py[i] = y_n
-                pz[i] = z_n
-                ok = ok +1
-        if 2 * ok < 3 * bad :
-            auto_scale = auto_scale * 1.5
-        if bad < 3 * ok :
-            auto_scale = auto_scale * 0.6666
-        print(f"warm: {frame}")
-
-    print(f"scale: {auto_scale}")
-    anim_range = 360
-    for frame in range(anim_range):
-        ax.clear()
-        ax.set_facecolor('black')
-        # KIKAPCSOLJUK A TENGELYEKET A TISZTA, KOZMIKUS LÁTVÁNYÉRT
-        ax.grid(False)
-        ax.xaxis.pane.fill = False
-        ax.yaxis.pane.fill = False
-        ax.zaxis.pane.fill = False
-        ax.set_axis_off()
-        camera_angle = (frame / anim_range) * 360.0
-        ax.view_init(elev=35.0, azim=camera_angle)
-        rad = np.radians(camera_angle)
-        # A kamera elméleti iránya a térben (X és Y vetület a forgás szerint)
-        cam_x = np.cos(rad) * 30.0
-        cam_y = np.sin(rad) * 30.0
-        cam_z = np.sin(np.radians(25.0)) * 30.0
-        if np.any(buborek_maszk_m):
-            ax.scatter(x_szelet[buborek_maszk_m], y_szelet[buborek_maszk_m], z_szelet[buborek_maszk_m], color='orange', alpha=0.4, s=3, depthshade=True)
-        if np.any(buborek_maszk_p):
-            ax.scatter(x_szelet[buborek_maszk_p], y_szelet[buborek_maszk_p], z_szelet[buborek_maszk_p], color='purple', alpha=0.4, s=3, depthshade=True)
-
-        for i in range(num_particles):
-            x_n, y_n, z_n = px[i], py[i], pz[i]
-            x_s, y_s, z_s = x_n, y_n, z_n
-            x_draw, y_draw, z_draw = [x_n], [y_n], [z_n]
-            for ph in range(7) :
-                ix, iy, iz = np.abs(xi - x_n).argmin(), np.abs(yi - y_n).argmin(), np.abs(zi - z_n).argmin()
-                local_u   = U[iz, iy, ix]
-                local_v   = V[iz, iy, ix]
-                local_w   = W[iz, iy, ix]
-                local_R   = R[iz, iy, ix]
-                local_C   = C[iz, iy, ix]
-                local_g00 = T[iz, iy, ix]
-                u_eff = local_u #+ (local_g12 * local_v) + (local_g13 * local_w)
-                v_eff = local_v #- (local_g12 * local_u) + (local_g23 * local_w)
-                w_eff = local_w #- (local_g13 * local_u) - (local_g23 * local_v)
-                if np.abs(local_R) < 0.003 : local_R = 0.002 * np.sign(local_R)
-                dynamic_factor = local_R * (1.0 + local_g00) * auto_scale
-                dynamic_factor = np.power(np.abs(dynamic_factor), (1/5)) * np.sign(dynamic_factor)
-                local_dx = u_eff * dynamic_factor
-                local_dy = v_eff * dynamic_factor
-                local_dz = w_eff * dynamic_factor
-                x_n = x_n - local_dx
-                y_n = y_n - local_dy
-                z_n = z_n - local_dz
-                if  x_n < x_min or x_n > x_max or y_n < y_min or y_n > y_max or z_n < z_min or z_n > z_max:
-                    break            
-                x_draw.append( x_n )
-                y_draw.append( y_n )
-                z_draw.append( z_n )
-            v_mag = np.sqrt((x_n-x_s)**2 + (y_n-y_s)**2 + (z_n-z_s)**2)
-            if len(x_draw) == 1 or v_mag < 0.7 : 
-                px[i] = px_orig[i]
-                py[i] = py_orig[i]
-                pz[i] = pz_orig[i]
-            else :
-                px[i] = x_draw[1]
-                py[i] = y_draw[1]
-                pz[i] = z_draw[1]
-                #distance_to_cam = np.sqrt((x_[0] - cam_x)**2 + (y_[0] - cam_y)**2 + (z_[0] - cam_z)**2)        
-                #depth_alpha = 1.0 - (distance_to_cam - 15.0) / 45.0
-                #alpha_factor = min(1.0, max(0.1, depth_alpha))
-                #color_intensity = min(1.0, max(0.1, local_C / 0.33))
-                #line_color = (color_intensity, 1.0 - color_intensity, 1.0) 
-                #print( x_draw, y_draw, z_draw )
-                ax.plot(x_draw, y_draw, z_draw, color="cyan", linewidth=0.9, alpha=0.6)
-
-           
-        ax.plot(
-            [x_min, x_max, x_max, x_min, x_min, x_min, x_max, x_max, x_min, x_min, x_min],
-            [y_min, y_min, y_max, y_max, y_min, y_min, y_min, y_max, y_max, y_min, y_min],
-            [z_min, z_min, z_min, z_min, z_min, z_max, z_max, z_max, z_max, z_max, z_max],
-            color='white', linewidth=0.5, alpha=0.5)
-        ax.plot( [x_min, x_min], [y_max, y_max], [z_min, z_max], color='white', linewidth=0.5, alpha=0.5)
-        ax.plot( [x_max, x_max], [y_min, y_min], [z_min, z_max], color='white', linewidth=0.5, alpha=0.5)
-        ax.plot( [x_max, x_max], [y_max, y_max], [z_min, z_max], color='white', linewidth=1.0, alpha=0.8)
-        # Lakattal lezárjuk a határokat
-        ax.set_xlim(x_min, x_max)
-        ax.set_ylim(y_min, y_max)
-        ax.set_zlim(z_min, z_max)
-        # Pufferelés a szélsebes RAM memóriába (BytesIO)
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png', bbox_inches='tight', facecolor='black', dpi=100)
-        buf.seek(0)
-        
-        img = Image.open(buf)
-        img.load() 
-        rgb_img = img.convert('RGB')
-        kockak_kepei.append(rgb_img)
-        print(f"frame: {frame}/{anim_range}")
-        buf.close()
+                print("num=0")
+        else :
+            ax.set_xlim(x_min, x_max)
+            ax.set_ylim(y_min, y_max)
+            ax.set_zlim(z_min, z_max)
+            
+            # Pufferelés a RAM-ba
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png', bbox_inches='tight', facecolor='black', dpi=100)
+            buf.seek(0)
+            img = Image.open(buf)
+            img.load() 
+            kockak_kepei.append(img.convert('RGB'))
+            print(f"frame: {frame-warm_range}/{anim_range}")
+            buf.close()    
 
 
     print("Összefűzés és mentés animált WEBP fájlba...")
