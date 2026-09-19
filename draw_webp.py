@@ -8,7 +8,8 @@ from PIL import Image
 from tkinter import filedialog
 import io
 
-N = 53
+halfed_degree = True
+N = 53 # only default
 writer = PillowWriter(fps=10)
 
 def clean_and_shape_3d(raw_vector, coord=False):
@@ -26,6 +27,11 @@ def clean_and_shape_3d(raw_vector, coord=False):
         N = int(max_ - min_) + 1
     return cleaned.reshape((N, N, N)) #.transpose(2, 1, 0)
 
+def float_range(start, stop, step):
+    while start < stop:
+        yield start
+        start += step
+        
 while True :
     filename = filedialog.askopenfilename(
         title="Válassz ki egy adatsort (53x53x53 CSV)",
@@ -124,8 +130,7 @@ while True :
 
     last_watch_end = anim_range + warm_range
 
-    for frame in range(0, anim_range + warm_range):
-        
+    for frame in float_range(0, anim_range + warm_range, 0.5 if halfed_degree else 1.0 ):
         if frame >= warm_range :
             ax.clear()
             ax.set_facecolor('black')
@@ -248,9 +253,11 @@ while True :
 
 
     print("Összefűzés és mentés animált WEBP fájlba...")
+    halftext = "_2" if halfed_degree else ""
+    save_name = filename+halftext+".webp"
 
     kockak_kepei[0].save(
-        filename+".webp",
+        save_name,
         format="WEBP",                  # Explicit megadjuk a formátumot
         save_all=True,              # Kötelező: az összes kocka mentése!
         append_images=kockak_kepei[1:], # Hozzáfűzzük a maradékok fáziskockáit
@@ -259,5 +266,5 @@ while True :
     )
 
     plt.close()
-    print(f"Siker! A '{filename}.webp' elkészült.")
+    print(f"Siker! A '{save_name}' elkészült.")
 
