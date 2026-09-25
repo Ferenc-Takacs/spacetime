@@ -288,6 +288,17 @@ impl eframe::App for SpacetimeApp {
 
         let mut redraw = false;
 
+        if ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                egui::Modifiers::COMMAND,
+                egui::Key::S,
+            ))
+        }) {
+            // save csv and 
+            self.need_save = true;
+            self.is_running_gpu = false;
+        }
+
         ctx.input(|i| {
             for event in &i.events {
                 if let egui::Event::Screenshot { image, .. } = event {
@@ -449,7 +460,7 @@ impl eframe::App for SpacetimeApp {
                     }
                 }
                 
-                if self.need_save || (!self.is_running_gpu && ui.button("Save data (csv)").clicked()) {
+                if self.need_save || (!self.is_running_gpu && ui.button("Save data (csv) [Ctrl+S]").clicked()) {
                     self.save_cvs();
                     self.last_save = self.dims_data.step_index;
                     if self.need_save {

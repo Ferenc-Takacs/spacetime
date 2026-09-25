@@ -78,7 +78,8 @@ while True :
     t_min = np.min(T)
     t_max = np.max(T)
     r_abs_max = max( max(abs(r_min), 0.002), max(abs(r_max), 0.002) )
-    s_max = r_abs_max * max_speed  * (1.0 + t_max)
+    s_max = abs(r_abs_max * max_speed  * (1.0 + t_max))
+    print(f"s_max {s_max},  max_speed {max_speed},  t_max {t_max}")
     auto_scale = np.power(1000000000000.0 / s_max, 1/5)
     print(f"speed :{max_speed} s_max: {s_max} scale: {auto_scale}")
     scale_factor = 0.75
@@ -89,11 +90,11 @@ while True :
     if r_min < 0 :
         Rm = R[ R < 0]
         if len(Rm) > 0:
-            buborek_maszk_m = ( R <= np.percentile(Rm, 1) ) & ( R < 0 )
+            buborek_maszk_m = ( R <= np.percentile(Rm, 3) ) & ( R < 0 )
     if r_max > 0 :
         Rp = R[ R > 0]
         if len(Rp) > 0:
-            buborek_maszk_p = ( R >= np.percentile(Rp, 99) ) & ( R > 0 )
+            buborek_maszk_p = ( R >= np.percentile(Rp, 97) ) & ( R > 0 )
 
     x_min, x_max = xi.min(), xi.max()
     y_min, y_max = yi.min(), yi.max()
@@ -154,6 +155,8 @@ while True :
             
         long = 0
         num = 0
+        ok = 0
+        bad = 0
         for i in range(num_particles):
             hist_x_i = hist_x[i]
             hist_y_i = hist_y[i]
@@ -172,6 +175,7 @@ while True :
             local_u, local_v, local_w = U[iz, iy, ix], V[iz, iy, ix], W[iz, iy, ix]
             local_R, local_g00 = R[iz, iy, ix], T[iz, iy, ix]
             if np.abs(local_R) < 0.002 : local_R = 0.002 * np.sign(local_R)
+            if local_R == 0 : local_R = 0.002
             dynamic_factor = local_R * (1.0 + local_g00) * auto_scale
             dynamic_factor = np.power(np.abs(dynamic_factor), (1/5)) * np.sign(dynamic_factor)
             x_next = x_prev - local_u * dynamic_factor
@@ -190,6 +194,7 @@ while True :
                     long = long + v_mag
                     num = num + 1
                 end = True
+                bad = bad + 1
                 #if watch_part == i :
                 #    last_watch_end = frame
             else:
@@ -199,6 +204,7 @@ while True :
                 hist_z_i[5] = z_next
                 long = long + v_mag
                 num = num + 1
+                ok = ok + 1
             if frame >= warm_range :
                 local_g12, local_g13, local_g23 = G12[iz, iy, ix], G13[iz, iy, ix], G23[iz, iy, ix]
                 shear_intensity = np.power(local_g12**2 + local_g13**2 + local_g23**2, 1/3)
@@ -231,9 +237,9 @@ while True :
                     auto_scale = auto_scale / long
                     ch = '/'
                 if long < 0.25 :
-                    auto_scale = auto_scale / ( long * 4 )
+                    auto_scale = auto_scale / ( long * 4 ) if long > 0.000001 else auto_scale * 100
                     ch = '*'
-                print(f"warm: {frame} factor: {scale_factor} scale{ch}: {auto_scale} long: {long} num:{num}")
+                print(f"warm: {frame} factor: {scale_factor} scale{ch}: {auto_scale} long: {long} num:{num} bad: {bad} ok {ok} ")
             else :
                 print("num=0")
         else :
