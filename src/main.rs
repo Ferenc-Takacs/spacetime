@@ -78,13 +78,13 @@ struct SpacetimeApp {
 
 impl SpacetimeApp {
     fn new() -> Self {
-        let width  = 61;
-        let height = 61;
-        let depth  = 61;
+        let width  = 113;
+        let height = 113;
+        let depth  = 113;
         let dx: f32 = 0.5;
-        let dt: f32 = dx * 0.001;
-        let m = 1.6;
-        let r0 = 9.0;
+        let dt: f32 = dx * 0.002;
+        let m = 1.5;
+        let r0 = 7.0;
         let grid = SpacetimeGrid::new(width, height, depth, dx, dt, m, r0);
         let dims_data = GridDimensions { width: width, height: height, depth: depth, dx: dx, dt: dt, step_index: 0, pad1: 0, pad2: 0,};
         Self {
@@ -298,6 +298,15 @@ impl eframe::App for SpacetimeApp {
             self.need_save = true;
             self.is_running_gpu = false;
         }
+        if ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                egui::Modifiers::COMMAND,
+                egui::Key::Q,
+            ))
+        }) {
+            // stop simulate 
+            self.is_running_gpu = false;
+        }
 
         ctx.input(|i| {
             for event in &i.events {
@@ -406,7 +415,7 @@ impl eframe::App for SpacetimeApp {
                 }
 
                 // START / STOP GOMB
-                let button_text = if self.is_running_gpu { "⏸ STOP Simulate" } else { "▶ START Simulate" };
+                let button_text = if self.is_running_gpu { "⏸ STOP Simulate (Ctrl+Q)" } else { "▶ START Simulate" };
                 if ui.button(button_text).clicked() {
                     self.is_running_gpu = !self.is_running_gpu;
                 }
@@ -518,7 +527,7 @@ impl eframe::App for SpacetimeApp {
                                                     self.grid.data[idx_1d].data[i] = val;
                                                 }
                                             }
-                                        } else { ok = false; break; }
+                                        } // else { ok = false; break; } // allow other grid size data
                                     } else { ok = false;  break; }
                                 } else { ok = false;  break; }
                             }
@@ -1104,9 +1113,9 @@ impl SpacetimeGrid {
                     self.data[idx].data[3] =  1.0 + f * l_3 * l_3;
 
                     // BEINDÍTJUK A TÉRIDŐ KERESZT-TAGJAIT (Idő-Tér elcsavarodás)
-                    self.data[idx].data[4] = f * l_0 * l_1; // g01
-                    self.data[idx].data[5] = f * l_0 * l_2; // g02
-                    self.data[idx].data[6] = f * l_0 * l_3; // g03
+                    self.data[idx].data[4] = f * -l_0 * l_1; // g01
+                    self.data[idx].data[5] = f * -l_0 * l_2; // g02
+                    self.data[idx].data[6] = f * -l_0 * l_3; // g03
 
                     // Térbeli elcsavarodások (X-Y, X-Z, Y-Z)
                     self.data[idx].data[7] = f * l_1 * l_2; // g12

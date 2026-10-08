@@ -8,9 +8,13 @@ from PIL import Image
 from tkinter import filedialog
 import io
 
-halfed_degree = True
 N = 53 # only default
 writer = PillowWriter(fps=10)
+one_step = 0.5
+circle = 2.0
+anim_range = 360
+warm_range = 270 # must bigger as 8 and smaler as anim_range
+last_idx = 8 # number of line sectors
 
 def clean_and_shape_3d(raw_vector, coord=False):
     global N
@@ -57,6 +61,7 @@ while True :
         continue
     R   = clean_and_shape_3d(df['R'  ].values)
     C   = clean_and_shape_3d(df['C2' ].values)
+    K   = clean_and_shape_3d(df['K'  ].values)
     T   = clean_and_shape_3d(df['g00'].values)
     U   = clean_and_shape_3d(df['g01'].values)
     V   = clean_and_shape_3d(df['g02'].values)
@@ -67,60 +72,58 @@ while True :
     speed = np.sqrt(U**2 + V**2 + W**2)
     #SPEED = speed.reshape(N, N, N)
 
+    S = R - 2.0 * C - K
     xi = np.unique(x_szelet)
     yi = np.unique(y_szelet)
     zi = np.unique(z_szelet)
     X, Y, Z = np.meshgrid(xi, yi, zi)
 
     max_speed = np.max(speed)
-    r_min = np.min(R)
-    r_max = np.max(R)
+    s_min = np.min(S)
+    s_max = np.max(S)
     t_min = np.min(T)
     t_max = np.max(T)
-    r_abs_max = max( max(abs(r_min), 0.002), max(abs(r_max), 0.002) )
-    s_max = abs(r_abs_max * max_speed  * (1.0 + t_max))
-    print(f"s_max {s_max},  max_speed {max_speed},  t_max {t_max}")
-    auto_scale = np.power(1000000000000.0 / s_max, 1/5)
-    print(f"speed :{max_speed} s_max: {s_max} scale: {auto_scale}")
+    s_abs_max = max( max(abs(s_min), 0.002), max(abs(s_max), 0.002) )
+    ss_max = abs(s_abs_max * max_speed  * (1.0 + t_max))
+    print(f"ss_max {ss_max},  max_speed {max_speed},  t_max {t_max}")
+    auto_scale = np.power(1000000000000.0 / ss_max, 1/5)
+    print(f"speed :{max_speed} ss_max: {ss_max} scale: {auto_scale}")
     scale_factor = 0.75
     last_rate = 0.0
 
-    buborek_maszk_m = np.zeros_like(R, dtype=bool)
-    buborek_maszk_p = np.zeros_like(R, dtype=bool)
-    if r_min < 0 :
-        Rm = R[ R < 0]
-        if len(Rm) > 0:
-            buborek_maszk_m = ( R <= np.percentile(Rm, 3) ) & ( R < 0 )
-    if r_max > 0 :
-        Rp = R[ R > 0]
-        if len(Rp) > 0:
-            buborek_maszk_p = ( R >= np.percentile(Rp, 97) ) & ( R > 0 )
+    buborek_maszk_m = np.zeros_like(S, dtype=bool)
+    buborek_maszk_p = np.zeros_like(S, dtype=bool)
+    if s_min < 0 :
+        Sm = S[ S < 0]
+        if len(Sm) > 0:
+            buborek_maszk_m = ( S <= np.percentile(Sm, 1) ) & ( S < 0 )
+    if s_max > 0 :
+        Sp = S[ S > 0]
+        if len(Sp) > 0:
+            buborek_maszk_p = ( S >= np.percentile(Sp, 99) ) & ( S > 0 )
 
     x_min, x_max = xi.min(), xi.max()
     y_min, y_max = yi.min(), yi.max()
     z_min, z_max = zi.min(), zi.max()
     kockak_kepei = []
     np.random.seed(42) # Fix mag a reprodukálhatóságért
-    num_particles = 3000
+    num_particles = 2500
     px_orig = np.random.uniform(x_min, x_max, num_particles)
     py_orig = np.random.uniform(y_min, y_max, num_particles)
     pz_orig = np.random.uniform(z_min, z_max, num_particles)
     np.set_printoptions(precision=3, suppress=True)
     watch_part = 111
 
-    anim_range = 360
-    warm_range = 180 # must bigger as 8 and smaler as anim_range
-    
     # Eltároljuk a 360 képkockára az összes részecske 7 fázisú uszály-koordinátáját és színét
-    hist_x = np.zeros((num_particles, 6))
-    hist_y = np.zeros((num_particles, 6))
-    hist_z = np.zeros((num_particles, 6))
+    hist_x = np.zeros((num_particles, last_idx+1))
+    hist_y = np.zeros((num_particles, last_idx+1))
+    hist_z = np.zeros((num_particles, last_idx+1))
     hist_v = np.zeros((num_particles), dtype=int)
 
     for i in range(num_particles):
-        hist_x[i, 5] = px_orig[i]
-        hist_y[i, 5] = py_orig[i]
-        hist_z[i, 5] = pz_orig[i]
+        hist_x[i, last_idx] = px_orig[i]
+        hist_y[i, last_idx] = py_orig[i]
+        hist_z[i, last_idx] = pz_orig[i]
 
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_subplot(111, projection='3d')
@@ -129,22 +132,29 @@ while True :
     ax.set_facecolor('black')
     
 
-    last_watch_end = anim_range + warm_range
+    #last_watch_end = anim_range * circle + warm_range
 
-    for frame in float_range(0, anim_range + warm_range, 0.5 if halfed_degree else 1.0 ):
+    for frame in float_range(0, anim_range * circle + warm_range, one_step ):
         if frame >= warm_range :
             ax.clear()
             ax.set_facecolor('black')
             ax.grid(False)
             ax.xaxis.pane.fill = ax.yaxis.pane.fill = ax.zaxis.pane.fill = False
             ax.set_axis_off()
-            camera_angle = ((frame-warm_range) / anim_range) * 360.0
-            ax.view_init(elev=35.0, azim=camera_angle)
+            camera_angle = frame-warm_range
+            elev = 35.0
+            if circle == 2.0 :
+                if camera_angle < 35.0 : elev = camera_angle
+                elif camera_angle > 360.0 - 35.0 :
+                    if camera_angle < 360.0 + 35.0 : elev = 360.0 - camera_angle
+                    elif camera_angle < 720.0 - 35.0 : elev = -35.0
+                    else : elev = camera_angle - 720.0
+            ax.view_init(elev=elev, azim=camera_angle)
             # 1. Először kirajzoljuk a fix pontfelhőket, a kockát, és elvégezzük az első renderelést
             if np.any(buborek_maszk_m):
-                ax.scatter(x_szelet[buborek_maszk_m], y_szelet[buborek_maszk_m], z_szelet[buborek_maszk_m], color='gold', alpha=0.4, s=9, depthshade=True)
+                ax.scatter(x_szelet[buborek_maszk_m], y_szelet[buborek_maszk_m], z_szelet[buborek_maszk_m], color='gold', alpha=0.22)
             if np.any(buborek_maszk_p):
-                ax.scatter(x_szelet[buborek_maszk_p], y_szelet[buborek_maszk_p], z_szelet[buborek_maszk_p], color='magenta', alpha=0.4, s=9, depthshade=True)
+                ax.scatter(x_szelet[buborek_maszk_p], y_szelet[buborek_maszk_p], z_szelet[buborek_maszk_p], color='magenta', alpha=0.22)
             # Kockaváz rajzolása a háttérbe
             ax.plot([x_min, x_max, x_max, x_min, x_min, x_min, x_max, x_max, x_min, x_min, x_min],
                     [y_min, y_min, y_max, y_max, y_min, y_min, y_min, y_max, y_max, y_min, y_min],
@@ -161,11 +171,11 @@ while True :
             hist_x_i = hist_x[i]
             hist_y_i = hist_y[i]
             hist_z_i = hist_z[i]
-            x_prev = hist_x_i[5]
-            y_prev = hist_y_i[5]
-            z_prev = hist_z_i[5]
+            x_prev = hist_x_i[last_idx]
+            y_prev = hist_y_i[last_idx]
+            z_prev = hist_z_i[last_idx]
             v_prev = hist_v[i]
-            for j in range(5) :
+            for j in range(last_idx) :
                 jj = j+1
                 hist_x_i[j] = hist_x_i[jj]
                 hist_y_i[j] = hist_y_i[jj]
@@ -173,22 +183,23 @@ while True :
             end = False
             ix, iy, iz = np.abs(xi - x_prev).argmin(), np.abs(yi - y_prev).argmin(), np.abs(zi - z_prev).argmin()
             local_u, local_v, local_w = U[iz, iy, ix], V[iz, iy, ix], W[iz, iy, ix]
-            local_R, local_g00 = R[iz, iy, ix], T[iz, iy, ix]
-            if np.abs(local_R) < 0.002 : local_R = 0.002 * np.sign(local_R)
-            if local_R == 0 : local_R = 0.002
-            dynamic_factor = local_R * (1.0 + local_g00) * auto_scale
-            dynamic_factor = np.power(np.abs(dynamic_factor), (1/5)) * np.sign(dynamic_factor)
+            src, local_g00 = S[iz, iy, ix], T[iz, iy, ix]
+            #local_R, local_C, local_K, local_g00 = R[iz, iy, ix], C[iz, iy, ix], K[iz, iy, ix], T[iz, iy, ix]
+            #src = local_R - 2.0 * local_C - local_K
+            if np.abs(src) < 0.002 : src = 0.002 if src == 0 else 0.002 * np.sign(src)
+            dynamic_factor = src * (1.0 + local_g00) * auto_scale
+            dynamic_factor = np.power(np.abs(dynamic_factor), (1/last_idx)) * np.sign(dynamic_factor)
             x_next = x_prev - local_u * dynamic_factor
             y_next = y_prev - local_v * dynamic_factor
             z_next = z_prev - local_w * dynamic_factor
-            v_next = v_prev + 1 if v_prev < 5 else 5
-            first = 5-v_next
+            v_next = v_prev + 1 if v_prev < last_idx else last_idx
+            first = last_idx-v_next
             v_mag = np.sqrt((x_next-hist_x_i[first])**2 + (y_next-hist_y_i[first])**2 + (z_next-hist_z_i[first])**2) / v_next
             out = x_next < x_min or x_next > x_max or y_next < y_min or y_next > y_max or z_next < z_min or z_next > z_max
             if out or v_mag < 0.1:
-                hist_x_i[5] = px_orig[i]
-                hist_y_i[5] = py_orig[i]
-                hist_z_i[5] = pz_orig[i]
+                hist_x_i[last_idx] = px_orig[i]
+                hist_y_i[last_idx] = py_orig[i]
+                hist_z_i[last_idx] = pz_orig[i]
                 hist_v[i] = 0
                 if not out :
                     long = long + v_mag
@@ -199,9 +210,9 @@ while True :
                 #    last_watch_end = frame
             else:
                 hist_v[i] = v_next
-                hist_x_i[5] = x_next
-                hist_y_i[5] = y_next
-                hist_z_i[5] = z_next
+                hist_x_i[last_idx] = x_next
+                hist_y_i[last_idx] = y_next
+                hist_z_i[last_idx] = z_next
                 long = long + v_mag
                 num = num + 1
                 ok = ok + 1
@@ -213,13 +224,13 @@ while True :
                 if v_next == 5 and not end:
                     ax.plot(hist_x_i, hist_y_i, hist_z_i, color=line_color, linewidth=0.9, alpha=0.6)
                 else :
-                    last = 5 if end else 6
+                    last = last_idx if end else last_idx+1
                     xd = hist_x_i[first:last]
                     yd = hist_y_i[first:last]
                     zd = hist_z_i[first:last]
                     ax.plot(xd, yd, zd, color=line_color, linewidth=0.9, alpha=0.6)
-                    if v_next < 4 :
-                        last = 5 - v_next
+                    if v_next < last_idx-1 :
+                        last = last_idx - v_next
                         xd = hist_x_i[:last]
                         yd = hist_y_i[:last]
                         zd = hist_z_i[:last]
@@ -254,12 +265,12 @@ while True :
             img = Image.open(buf)
             img.load() 
             kockak_kepei.append(img.convert('RGB'))
-            print(f"frame: {frame-warm_range}/{anim_range}")
+            print(f"frame: {frame-warm_range}/{anim_range*circle}")
             buf.close()    
 
 
     print("Összefűzés és mentés animált WEBP fájlba...")
-    halftext = "_2" if halfed_degree else ""
+    halftext = f"_{one_step}"
     save_name = filename+halftext+".webp"
 
     kockak_kepei[0].save(
