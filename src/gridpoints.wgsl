@@ -958,7 +958,7 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
     let address = check_idx(coords);
     if ( address<0 ) { return; }
 
-    var sponge_factor = 1.0;
+    //var sponge_factor = 1.0;
     //let sponge_len = 4u;
     //let w = i32(dims.width); let h = i32(dims.height); let d = i32(dims.depth);
     //let dist_x = min(coords.x, u32(w - 1) - coords.x);
@@ -989,11 +989,12 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
     let T_em      = get_metric(OLD, address, ENERGY); // ENERGY_TENSOR slot (A phase3-ból)
 
     let R_scalar  = get_scalar(NEW, address, R_SCALAR);
-    let K_scalar  = get_scalar(NEW, address, K_SCALAR) * sponge_factor;;
-    var C2_scalar = get_scalar(NEW, address, C2_SCALAR) * sponge_factor;;
-    if (C2_scalar > 150.0) {
-        C2_scalar = 150.0;
-    }
+    let K_scalar  = get_scalar(NEW, address, K_SCALAR);// * sponge_factor;;
+    var C2_scalar = get_scalar(NEW, address, C2_SCALAR);// * sponge_factor;;
+    C2_scalar = C2_scalar / (1.0 + abs(C2_scalar / 160.0));
+    //if (C2_scalar > 150.0) {
+    //    C2_scalar = 150.0;
+    //}
     
     let ell_P_negyzet = 0.01;
     let phi = ell_P_negyzet * ((2.0 / 3.0) * K_scalar + (3.0 / 2.0) * C2_scalar);
@@ -1024,8 +1025,8 @@ fn phase4(@builtin(global_invocation_id) coords: vec3<u32>) {
         // A lambda-tag most már nem szorozza vakon a meglévő csúcsot, hanem az 
         // új complementer_tension operátoron keresztül a szabad irányokat pumpálja!
         //let source_term = T_em[r] + phi * complementer_tension - ricci[r];        
-        
-        let source_term_capped = clamp(source_term, -30.0, 30.0);
+        let source_term_capped = source_term / (1.0 + abs(source_term / 35.0));
+        //let source_term_capped = clamp(source_term, -30.0, 30.0);
         // Euler-időléptetés a momentumra
         var k = (k_past[r] + local_dt * source_term_capped);// * sponge_factor;
         // Túlcsordulás és NaN elleni szoftveres védőgát feloldása

@@ -14,7 +14,7 @@ one_step = 0.5
 circle = 2.0
 anim_range = 360
 warm_range = 270 # must bigger as 8 and smaler as anim_range
-last_idx = 8 # number of line sectors
+last_idx = 5 # number of line sectors
 
 def clean_and_shape_3d(raw_vector, coord=False):
     global N
