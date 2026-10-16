@@ -1,10 +1,14 @@
 # Spacetime Simulation under Curvature-Dependent Cosmological Constant
 
-A high-performance **Rust** and **WebGPU (WGSL)** simulation environment designed to numerically integrate a modified version of Einstein's field equations at the sub-Planckian scale. This framework treats the cosmological constant not as an immutable background value, but as a dynamic scalar field \(\Lambda(K, C^2)\) coupled directly to local geometric tension.
+A high-performance **Rust** and **WebGPU (WGSL)** simulation environment designed to numerically integrate a modified version of Einstein's field equations at the sub-Planckian scale. This framework treats the cosmological constant not as an immutable background value, but as a dynamic scalar field $$\Lambda(K, C^2)$$ coupled directly to local geometric tension.
+
+---
 
 ## 🌌 Theoretical Framework
 
-The core engine integrates the modified field equations presented in Ferenc Takács (2026), *A Version of Einstein's Equations Valid for the Entire Universe* (IJAA):
+The core engine integrates the modified field equations presented in Ferenc Takács (2026), 
+*A Version of Einstein's Equations Valid for the Entire Universe* (IJAA)  https://doi.org/10.4236/ijaa.2026.163015, and 
+*ToE; Derivation of Quantum Phenomena from the Theory of Spacetime Geometry; Metric Tension in a Subatomic Environment* (JMP) https://doi.org/10.4236/jmp.2026.1710055:
 
 $$R_{\mu\nu} - \frac{1}{2}R g_{\mu\nu} + \Lambda(K, C^2) g_{\mu\nu} = \frac{8\pi G}{c^4} T_{\mu\nu}$$
 
@@ -13,7 +17,7 @@ Where the dynamic cosmological feedback loop is defined at the sub-atomic bounda
 $$\phi = \ell_P^2 \left( \frac{2}{3}K + \frac{3}{2}C^2 \right)$$
 
 *   **K (Kretschmann Scalar):** Measures localized Ricci-driven energy and tidal stresses, preventing gravitational singularities.
-*   **C² (Weyl Conformal Invariant Square):** Maps long-range non-local tidal shear and rotational vacuum feszültség.
+*   **C² (Weyl Conformal Invariant Square):** Maps long-range non-local tidal shear and rotational vacuum tension.
 
 ---
 
@@ -25,6 +29,8 @@ To handle the **41 orders of magnitude discrepancy** between gravitational and e
 2. **Conformal Stabilization:** Energy contributions from $$T_{em}$$ are attenuated via a `stabilization_factor = 1.0 / (1.0 + phi)`, providing a physical saturation barrier against infinite density.
 3. **Soft-Clipping Operators:** To suppress high-frequency numerical grid noise, the source terms and Weyl metrics are routed through non-linear asymptotic capping functions (e.g., `source_term / (1.0 + abs(source_term / 35.0))`).
 4. **Pure GPU Compute Pipeline:** The simulation runs entirely within parallelized WGSL compute shaders, leaving the CPU completely free.
+
+The grid size and other startup parameters are compilation options. On a smaller grid (61³) I stopped the simulation after 260 thousand iterations because the flow had grown too large on the grid. With the current 113³ spatial grid on i5 processor, one cycle takes 24 seconds.
 
 ---
 
@@ -40,11 +46,14 @@ cd spacetime
 # Run the simulation with release optimizations
 cargo run --release
 ```
+---
 
 ### Data Visualization
 The application exports the entire 4D metric tensor state into structured CSV snapshots every 10,000 steps. 
 * Use `draw_webp.py` to compile the snapshot logs into compressed, high-fidelity WebP animations.
 * Extended diagnostic tracking can be conducted using the integrated graphical analysis suites.
+
+---
 
 ## 🧪 Simulation Results (At 50,000 Iterations)
 
