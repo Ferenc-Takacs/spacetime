@@ -6,11 +6,11 @@ A high-performance **Rust** and **WebGPU (WGSL)** simulation environment designe
 
 The core engine integrates the modified field equations presented in Ferenc Takács (2026), *A Version of Einstein's Equations Valid for the Entire Universe* (IJAA):
 
-\[R_{\mu\nu} - \frac{1}{2}R g_{\mu\nu} + \Lambda(K, C^2) g_{\mu\nu} = \frac{8\pi G}{c^4} T_{\mu\nu}\]
+$$R_{\mu\nu} - \frac{1}{2}R g_{\mu\nu} + \Lambda(K, C^2) g_{\mu\nu} = \frac{8\pi G}{c^4} T_{\mu\nu}$$
 
-Where the dynamic cosmological feedback loop is defined at the sub-atomic boundary via fixed geometric couplings (γ = 2/3, δ = 3/2) and scale-corrected by the Planck length (\(\ell_P^2 = 0.01\)):
+Where the dynamic cosmological feedback loop is defined at the sub-atomic boundary via fixed geometric couplings (γ = 2/3, δ = 3/2) and scale-corrected by the Planck length $$(\ell_P^2 = 0.01\)$$:
 
-\[\phi = \ell_P^2 \left( \frac{2}{3}K + \frac{3}{2}C^2 \right)\]
+$$\phi = \ell_P^2 \left( \frac{2}{3}K + \frac{3}{2}C^2 \right)$$
 
 *   **K (Kretschmann Scalar):** Measures localized Ricci-driven energy and tidal stresses, preventing gravitational singularities.
 *   **C² (Weyl Conformal Invariant Square):** Maps long-range non-local tidal shear and rotational vacuum feszültség.
@@ -21,8 +21,8 @@ Where the dynamic cosmological feedback loop is defined at the sub-atomic bounda
 
 To handle the **41 orders of magnitude discrepancy** between gravitational and electromagnetic scales without numerical divergence, the simulator implements a highly optimized parallelized pipeline on a 113³ spatial grid:
 
-1. **Local Self-Regulated Timestepping (`local_dt`):** The code dynamically extracts the lapse function \(\alpha = \sqrt{\max(10^{-8}, -g_{00})}\) point-by-point. Simulation time automatically slows down in high-curvature domains, maximizing stability near the core event horizon.
-2. **Conformal Stabilization:** Energy contributions from \(T_{em}\) are attenuated via a `stabilization_factor = 1.0 / (1.0 + phi)`, providing a physical saturation barrier against infinite density.
+1. **Local Self-Regulated Timestepping (`local_dt`):** The code dynamically extracts the lapse function $$\alpha = \sqrt{\max(10^{-8}, -g_{00})}$$ point-by-point. Simulation time automatically slows down in high-curvature domains, maximizing stability near the core event horizon.
+2. **Conformal Stabilization:** Energy contributions from $$T_{em}$$ are attenuated via a `stabilization_factor = 1.0 / (1.0 + phi)`, providing a physical saturation barrier against infinite density.
 3. **Soft-Clipping Operators:** To suppress high-frequency numerical grid noise, the source terms and Weyl metrics are routed through non-linear asymptotic capping functions (e.g., `source_term / (1.0 + abs(source_term / 35.0))`).
 4. **Pure GPU Compute Pipeline:** The simulation runs entirely within parallelized WGSL compute shaders, leaving the CPU completely free.
 
