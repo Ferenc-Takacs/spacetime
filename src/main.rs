@@ -220,14 +220,22 @@ impl SpacetimeApp {
         let width = self.grid.width as i32;
         let height = self.grid.height as i32;
         let depth = self.grid.depth as i32;
-        let mut filename = format!(
-            "data{}_i{}_dx{:.4}_m{}_r{}.csv",
+        let filename_only = format!(
+            "data{}_i{}_dx{:.4}_m{}_r{}",
             self.dims_data.width, self.dims_data.step_index, self.dims_data.dx, self.grid.m, self.grid.r0
         );
-        if let Ok(file) = File::create(&filename) {
-            let mut writer = BufWriter::new(file);
+        let mul = 5;
+        let muli = mul as i32;
+        let filename1 = filename_only.clone() + ".csv";
+        let filename2 = format!("{}_{}.csv",filename_only,mul);
+        let add = ((self.grid.depth / mul) * mul) as i32;
+        if let Ok(file1) = File::create(&filename1) {
+            let file2 = File::create(&filename2).unwrap();
+            let mut writer1 = BufWriter::new(file1);
+            let mut writer2 = BufWriter::new(file2);
             let head = "x,y,z,g00,g11,g22,g33,g01,g02,g03,g12,g13,g23,k00,k11,k22,k33,k01,k02,k03,k12,k13,k23,T00,T11,T22,T33,T01,T02,T03,T12,T13,T23,R00,R11,R22,R33,R01,R02,R03,R12,R13,R23,R,K,C2,Phi,E11,E22,E12,|E|,B11,B22,B12,|B|\n";
-            let _ = writer.write_all(head.as_bytes());
+            let _ = writer1.write_all(head.as_bytes());
+            let _ = writer2.write_all(head.as_bytes());
             for z in 0..self.grid.depth {
                 for y in 0..self.grid.height {
                     for x in 0..self.grid.width {
@@ -244,17 +252,29 @@ impl SpacetimeApp {
                                 row_string += &format!("{},", gr.data[i]);
                             }
                         }
-                        let _ = writer.write_all(row_string.as_bytes());
+                        let _ = writer1.write_all(row_string.as_bytes());
+                        if (cx + add) % muli == 0 && (cy + add) % muli == 0 && (cz + add) % muli == 0 {
+                            let mut row_string = format!("{},{},{},", cx/muli, cy/muli, cz/muli);
+                            for i in 0..52 {
+                                if i == 51 {
+                                    row_string += &format!("{}\n", gr.data[i]);
+                                } else {
+                                    row_string += &format!("{},", gr.data[i]);
+                                }
+                            }
+                            let _ = writer2.write_all(row_string.as_bytes());
+                        }
                     }
                 }
             }
-            let _ = writer.flush();
-            println!("A szimulációs adatok sikeresen kimentve a '{}' fájlba!", filename);
+            let _ = writer1.flush();
+            let _ = writer2.flush();
+            println!("A szimulációs adatok sikeresen kimentve a '{}' fájlba!", filename1);
         }
-        filename = filename + ".mm";
-        if let Ok(file) = File::create(&filename) {
+        let filename3 = filename_only + ".mm";
+        if let Ok(file) = File::create(&filename3) {
             let mut writer = BufWriter::new(file);
-            let _ = writer.write_all(("# file: ".to_owned()+&filename+"\n# var[ minimum; maximum ]\n").as_bytes());
+            let _ = writer.write_all(("# file: ".to_owned()+&filename3+"\n# var[ minimum; maximum ]\n").as_bytes());
             let varnames =  ["g00","g11","g22","g33","g01","g02","g03","g12","g13","g23","k00","k11","k22","k33","k01","k02","k03","k12","k13","k23","T00","T11","T22","T33","T01","T02","T03","T12","T13","T23","R00","R11","R22","R33","R01","R02","R03","R12","R13","R23","R","K","C2","Phi","E11","E22","E12","|E|","B11","B22","B12","|B|"];
             for offset in 0..52 {
                 let mut current_min = f32::MAX;

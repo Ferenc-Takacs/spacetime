@@ -15,15 +15,15 @@ KVAL_CUT = 0
 MAX_ABS_PHI = 5.0
 
 filename = filedialog.askopenfilename(
-    title="Válassz ki egy adatsort (53x53x53 CSV)",
-    filetypes=[("CSV fájlok", "*.csv"), ("Minden fájl", "*.*")]
+    title="Select a datafile (data<nnn>...CSV)",
+    filetypes=[("CSV files", "*.csv"), ("Any files", "*.*")]
 )
 if filename == '' :
     exit()
 
 fields = ['g01','g02','g03']
 fields_text = "g01,g02,g03,";
-current_mode_title = "Skalármező"
+current_mode_title = "Scalar field"
 current_mode = 1 # 1,2,3,4,5
 
 df = None
@@ -55,13 +55,13 @@ def load_and_process_data(fname="*", field_text="*"):
 
         if fname != "*" :
             if not os.path.exists(fname):
-                print(f"HIBA: A(z) '{fname}' fájl nem létezik a mappában!")
+                print(f"Error: The '{fname}' file not exsist!")
                 return False
             temp_df = pd.read_csv(fname)
             # Alap kötelező koordináták ellenőrzése
             for coord in ['x', 'y', 'z']:
                 if coord not in temp_df.columns:
-                    print(f"HIBA: Az új fájlból hiányzik a(z) '{coord}' oszlop!")
+                    print(f"Error: Absent '{coord}' rows!")
                     return False
             # Koordináta rácsok építése
             X = clean_and_shape_3d(temp_df['x'].values, KVAL_CUT, coord=True)
@@ -71,7 +71,7 @@ def load_and_process_data(fname="*", field_text="*"):
             min_y, max_y = Y.min(), Y.max()
             min_z, max_z = Z.min(), Z.max()
             if min_y != min_x or min_z != min_x or max_y != max_x or max_z != max_x :
-                print(f"HIBA: inkonzisztens koordináta tartomány!")
+                print(f"Error: inkonzistens coordinate range!")
                 return False
             df = temp_df
             filename = fname
@@ -79,13 +79,13 @@ def load_and_process_data(fname="*", field_text="*"):
         if field_text != "*" :
             parts = [p.strip() for p in field_text.split(',')]
             if len(parts) >= 1 and parts[0] not in df.columns:
-                print(f"HIBA: A(z) '{parts[0]}' mező nem található az új '{filename}' fájlban!\n Elérhetők:  {df.columns.tolist()}")
+                print(f"Error: The '{parts[0]}' field not exist in new file '{filename}'!\n Acceptable:  {df.columns.tolist()}")
                 return False
             if len(parts) >= 3 and parts[1] not in df.columns:
-                print(f"HIBA: A(z) '{parts[1]}' mező nem található az új '{filename}' fájlban!\n Elérhetők:  {df.columns.tolist()}")
+                print(f"Error: The '{parts[1]}'  field not exist in new file '{filename}'!\n Acceptable:  {df.columns.tolist()}")
                 return False
             if len(parts) >= 3 and parts[2] not in df.columns:
-                print(f"HIBA: A(z) '{parts[2]}' mező nem található az új '{filename}' fájlban!\n Elérhetők:  {df.columns.tolist()}")
+                print(f"Error: The '{parts[2]}'  field not exist in new file '{filename}'!\n Acceptable:  {df.columns.tolist()}")
                 return False
             fields = parts
             fields_text = field_text
@@ -93,11 +93,11 @@ def load_and_process_data(fname="*", field_text="*"):
         # Logika alkalmazása a mezőszámok alapján
         current_mode = len(fields)
         if len(fields) == 1:
-            current_mode_title = f"Skalármező felület: '{fields[0]}'"
+            current_mode_title = f"Skalar field surface: '{fields[0]}'"
             Phi = clean_and_shape_3d(df[fields[0]].values, KVAL_CUT, apply_abs_filter=True)
 
         elif len(fields) == 2: # skalármező gradiense
-            current_mode_title = f"Skalármező + Gradiens: '{fields[0]}'"
+            current_mode_title = f"Skalar field + Gradient: '{fields[0]}'"
             Phi = clean_and_shape_3d(df[fields[0]].values, KVAL_CUT, apply_abs_filter=True)
             grad_x, grad_y, grad_z = np.gradient(Phi)
             U = -grad_x
@@ -108,7 +108,7 @@ def load_and_process_data(fname="*", field_text="*"):
             #print(f"grad len: {float(A.max())}")
 
         elif len(fields) == 3:
-            current_mode_title = f"Vektormező {fields[0]},{fields[1]},{fields[2]})"
+            current_mode_title = f"Vector field {fields[0]},{fields[1]},{fields[2]})"
             U = clean_and_shape_3d(df[fields[0]].values, KVAL_CUT)
             V = clean_and_shape_3d(df[fields[1]].values, KVAL_CUT)
             W = clean_and_shape_3d(df[fields[2]].values, KVAL_CUT)
@@ -116,7 +116,7 @@ def load_and_process_data(fname="*", field_text="*"):
             Phi = clean_and_shape_3d(vlen_raw, KVAL_CUT, apply_abs_filter=True)
 
         elif len(fields) == 4:
-            current_mode_title = f"Vektormező + Felület: {fields[0]},{fields[1]},{fields[2]}"
+            current_mode_title = f"Vector field + surface: {fields[0]},{fields[1]},{fields[2]}"
             U = clean_and_shape_3d(df[fields[0]].values, KVAL_CUT)
             V = clean_and_shape_3d(df[fields[1]].values, KVAL_CUT)
             W = clean_and_shape_3d(df[fields[2]].values, KVAL_CUT)
@@ -124,7 +124,7 @@ def load_and_process_data(fname="*", field_text="*"):
             Phi = clean_and_shape_3d(vlen_raw, KVAL_CUT, apply_abs_filter=True)
 
         elif len(fields) == 5:
-            current_mode_title = f"Felület vektormezőből: {fields[0]},{fields[1]},{fields[2]}"
+            current_mode_title = f"Surface from vector field: {fields[0]},{fields[1]},{fields[2]}"
             U = clean_and_shape_3d(df[fields[0]].values, KVAL_CUT)
             V = clean_and_shape_3d(df[fields[1]].values, KVAL_CUT)
             W = clean_and_shape_3d(df[fields[2]].values, KVAL_CUT)
@@ -136,7 +136,7 @@ def load_and_process_data(fname="*", field_text="*"):
         return True
 
 if not load_and_process_data( fname=filename, field_text=fields_text):
-    print("Kritikus hiba: Az indítófájl nem tölthető be. Kérlek ellenőrizd a {filename} meglétét.")
+    print("Fatal error: File  {filename} can't load .")
     exit()
 
 init_level1 = phi_min + (phi_max - phi_min) * 0.35
@@ -184,7 +184,7 @@ def draw_surfaces_with_normals(level1, level2):
     process_layer(level1, 'royalblue', 'navy', 0.4)
     process_layer(level2, 'darkorange', 'chocolate', 0.4)
 
-    ax.set_title(f'Fájl: "{filename}" | Mód: {current_mode_title}\n'
+    ax.set_title(f'File: "{filename}" | Mode: {current_mode_title}\n'
                  f'Min = {phi_min} | Max = {phi_max}')
     ax.set_xlabel('X'); ax.set_ylabel('Y'); ax.set_zlabel('Z')
     ax.set_xlim(min_x, max_x); ax.set_ylim(min_y, max_y); ax.set_zlim(min_z, max_z)
@@ -196,11 +196,11 @@ ax_phi2 = plt.axes([0.25, 0.12, 0.6, 0.02])
 ax_fields_box = plt.axes([0.25, 0.08, 0.6, 0.03])
 ax_file_btn = plt.axes([0.25, 0.04, 0.6, 0.03]) # Új gomb pozíciója a régi mező helyén
 
-s_phi1 = Slider(ax_phi1, 'Kék szint ($\Phi_1$)', phi_min, phi_max, valinit=init_level1, dragging=False, color='royalblue')
-s_phi2 = Slider(ax_phi2, 'Narancs szint ($\Phi_2$)', phi_min, phi_max, valinit=init_level2, dragging=False, color='darkorange')
+s_phi1 = Slider(ax_phi1, 'Blue level ($\Phi_1$)', phi_min, phi_max, valinit=init_level1, dragging=False, color='royalblue')
+s_phi2 = Slider(ax_phi2, 'Orange level ($\Phi_2$)', phi_min, phi_max, valinit=init_level2, dragging=False, color='darkorange')
 
-fields_textbox = TextBox(ax_fields_box, 'Mező(k) nevei: ', initial=fields_text)
-file_button = Button(ax_file_btn, 'Új CSV fájl megnyitása...', color='lightgray', hovercolor='gainsboro')
+fields_textbox = TextBox(ax_fields_box, 'Fieldname(s): ', initial=fields_text)
+file_button = Button(ax_file_btn, 'Open new CSV file...', color='lightgray', hovercolor='gainsboro')
 
 def refresh_interface_and_draw():
     lvl1 = phi_min + (phi_max - phi_min) * 0.35
@@ -228,8 +228,8 @@ fields_textbox.on_submit(on_fields_submit)
 
 def on_file_button_clicked(event):
     selected_file = filedialog.askopenfilename(
-        title="Válassz ki egy adatsort (54x54x54 CSV)",
-        filetypes=[("CSV fájlok", "*.csv"), ("Minden fájl", "*.*")]
+        title="Select a datafile (data<nnn>...CSV)",
+        filetypes=[("CSV files", "*.csv"), ("Any files", "*.*")]
     )
     if selected_file:
         if load_and_process_data(fname = selected_file):

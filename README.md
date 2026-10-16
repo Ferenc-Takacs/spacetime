@@ -50,8 +50,8 @@ cargo run --release
 
 ### Data Visualization
 The application exports the entire 4D metric tensor state into structured CSV snapshots every 10,000 steps. 
-* Use `draw_webp.py` to compile the snapshot logs into compressed, high-fidelity WebP animations.
-* Extended diagnostic tracking can be conducted using the integrated graphical analysis suites.
+* Use `draw_webp.py` to compile the snapshot logs into compressed, high-fidelity WebP animations. Flow is indicated by moving lines, which are colored cyan in a smooth environment, and magenta when there is high torsion and shear. Areas of highest stress are colored gold or magenta
+* Extended diagnostic tracking can be conducted using the integrated graphical analysis suites (examine_csv.py).
 
 ---
 
