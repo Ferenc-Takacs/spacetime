@@ -1,4 +1,4 @@
-# file: data113_i40000_dx0.5000_m1.5_r7.csv.mm
+# file: data113_i40000_dx0.5000_m1.5_r7.mm
 # var[ minimum; maximum ]
 g00[ -1.3564172; -0.8196408 ]
 g11[ 0.8241111; 1.198978 ]
