@@ -224,7 +224,7 @@ impl SpacetimeApp {
             "data{}_i{}_dx{:.4}_m{}_r{}",
             self.dims_data.width, self.dims_data.step_index, self.dims_data.dx, self.grid.m, self.grid.r0
         );
-        let mul = 5;
+        let mul = 3;
         let muli = mul as i32;
         let filename1 = filename_only.clone() + ".csv";
         let filename2 = format!("{}_{}.csv",filename_only,mul);
