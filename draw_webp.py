@@ -7,14 +7,20 @@ import pandas as pd
 from PIL import Image
 from tkinter import filedialog
 import io
+#from moviepy.editor import ImageSequenceClip, AudioFileClip, TextClip, CompositeVideoClip
+# A régi "from moviepy.editor import ..." helyett:
+from moviepy import ImageSequenceClip, AudioFileClip, TextClip, CompositeVideoClip
 
 N = 53 # only default
 writer = PillowWriter(fps=10)
 one_step = 0.5
-circle = 2.0
+circle = 1.0
 anim_range = 360
-warm_range = 270 # must bigger as 8 and smaler as anim_range
+warm_range = 120 # must bigger as 8 and smaler as anim_range
 last_idx = 5 # number of line sectors
+wait_30 = True
+mask_lo_level = 0.3
+mask_hi_level = 3.0
 
 def clean_and_shape_3d(raw_vector, coord=False):
     global N
@@ -49,6 +55,7 @@ while True :
             print(f"HIBA: Az új fájlból hiányzik a(z) '{coord}' oszlop!")
             exit()
     print(filename)
+    scr_mul = 15.0 if filename.endswith("_3.csv") else 1.0
 
     x_szelet = clean_and_shape_3d(df['x'].values, coord=True)
     y_szelet = clean_and_shape_3d(df['y'].values)
@@ -96,11 +103,11 @@ while True :
     if s_min < 0 :
         Sm = S[ S < 0]
         if len(Sm) > 0:
-            buborek_maszk_m = ( S <= np.percentile(Sm, 1) ) & ( S < 0 )
+            buborek_maszk_m = ( S <= np.percentile(Sm, (mask_lo_level*scr_mul)) ) & ( S < 0 )
     if s_max > 0 :
         Sp = S[ S > 0]
         if len(Sp) > 0:
-            buborek_maszk_p = ( S >= np.percentile(Sp, 99) ) & ( S > 0 )
+            buborek_maszk_p = ( S >= np.percentile(Sp, (100.0 - mask_hi_level*scr_mul)) ) & ( S > 0 )
 
     x_min, x_max = xi.min(), xi.max()
     y_min, y_max = yi.min(), yi.max()
@@ -125,7 +132,7 @@ while True :
         hist_y[i, last_idx] = py_orig[i]
         hist_z[i, last_idx] = pz_orig[i]
 
-    fig = plt.figure(figsize=(10, 10))
+    fig = plt.figure(figsize=(6, 10.66)) # ~9:16-os képarány Reels-hez
     ax = fig.add_subplot(111, projection='3d')
     fig.patch.set_facecolor('black')
     ax.set_proj_type('persp', focal_length=0.2) # Bekapcsolja a valós 3D perspektívát!
@@ -137,7 +144,7 @@ while True :
     for frame in float_range(0, anim_range * circle + warm_range, one_step ):
         camera_angle = frame-warm_range
         # 30 fokonként megállunk egy rövid ideig a forgással
-        repeat = 20 if frame >= warm_range and camera_angle % 30 == 15 else 1
+        repeat = 1 if frame < warm_range or not wait_30 or camera_angle % 30 != 15 else 20
         for r in range(repeat) :
             if frame >= warm_range :
                 ax.clear()
@@ -157,7 +164,7 @@ while True :
                 if np.any(buborek_maszk_m):
                     ax.scatter(x_szelet[buborek_maszk_m], y_szelet[buborek_maszk_m], z_szelet[buborek_maszk_m], color='gold', alpha=0.22)
                 if np.any(buborek_maszk_p):
-                    ax.scatter(x_szelet[buborek_maszk_p], y_szelet[buborek_maszk_p], z_szelet[buborek_maszk_p], color='magenta', alpha=0.22)
+                    ax.scatter(x_szelet[buborek_maszk_p], y_szelet[buborek_maszk_p], z_szelet[buborek_maszk_p], color='green', alpha=0.22)
                 # Kockaváz rajzolása a háttérbe
                 ax.plot([x_min, x_max, x_max, x_min, x_min, x_min, x_max, x_max, x_min, x_min, x_min],
                         [y_min, y_min, y_max, y_max, y_min, y_min, y_min, y_max, y_max, y_min, y_min],
@@ -186,10 +193,12 @@ while True :
                 end = False
                 ix, iy, iz = np.abs(xi - x_prev).argmin(), np.abs(yi - y_prev).argmin(), np.abs(zi - z_prev).argmin()
                 local_u, local_v, local_w = U[iz, iy, ix], V[iz, iy, ix], W[iz, iy, ix]
-                src, local_g00 = S[iz, iy, ix], T[iz, iy, ix]
+                #src = S[iz, iy, ix]
+                local_g00 = T[iz, iy, ix]
                 #local_R, local_C, local_K, local_g00 = R[iz, iy, ix], C[iz, iy, ix], K[iz, iy, ix], T[iz, iy, ix]
                 #src = local_R - 2.0 * local_C - local_K
-                if np.abs(src) < 0.002 : src = 0.002 if src == 0 else 0.002 * np.sign(src)
+                #if np.abs(src) < 0.002 : src = 0.002 if src == 0 else 0.002 * np.sign(src)
+                src = -1.0 / scr_mul
                 dynamic_factor = src * (1.0 + local_g00) * auto_scale
                 dynamic_factor = np.power(np.abs(dynamic_factor), (1/last_idx)) * np.sign(dynamic_factor)
                 x_next = x_prev - local_u * dynamic_factor
@@ -263,7 +272,8 @@ while True :
                 
                 # Pufferelés a RAM-ba
                 buf = io.BytesIO()
-                plt.savefig(buf, format='png', bbox_inches='tight', facecolor='black', dpi=100)
+                #plt.savefig(buf, format='png', bbox_inches='tight', facecolor='black', dpi=100)
+                plt.savefig(buf, format='png', facecolor='black', edgecolor='none', pad_inches=0, dpi=100)
                 buf.seek(0)
                 img = Image.open(buf)
                 img.load() 
@@ -276,14 +286,36 @@ while True :
     halftext = f"_{one_step}"
     save_name = filename+halftext+".webp"
 
-    kockak_kepei[0].save(
+
+    numpy_kockak = [np.array(img) for img in kockak_kepei]
+    video_clip  = ImageSequenceClip(numpy_kockak, fps=10)
+    audio_clip = AudioFileClip("Hans_Zimmer_-_Interstellar_Main_Theme.mp3").subclipped(0, video_clip.duration)
+    video_clip = video_clip.with_audio(audio_clip)
+    # Megjegyzés: A TextClip-hez szükséges, at ImageMagick telepítve legyen a gépeden
+    #HOSSZU_SZOVEG = "Ez itt egy hosszabb szöveg,\nami szépen lassan\nfelfelé fog úszni\na képernyőn..."
+    #txt_clip = TextClip(font='C:\\Windows\\Fonts\\arialbd.ttf', text=HOSSZU_SZOVEG, font_size=50, color='white')
+    #txt_clip = txt_clip.with_position(('center', 'bottom')).with_duration(video_clip.duration)
+    #sebesseg = 50
+    #w, h = video_clip.size
+    #def uszato_pozicio(t):
+    #    x = 'center'                      # Vízszintesen marad középen
+    #    y = h - (t * sebesseg)            # Függőleges pozíció számítása
+    #    return (x, y)
+    #txt_clip = txt_clip.with_position(uszato_pozicio)
+    #final_clip = CompositeVideoClip([video_clip, txt_clip]).fx(loop)
+    #video_clip.fx(loop=0)
+    video_clip.write_videofile(filename+halftext+".mp4", codec="libx264", audio_codec="aac", bitrate="5000k")
+
+    '''kockak_kepei[0].save(
         save_name,
         format="WEBP",                  # Explicit megadjuk a formátumot
         save_all=True,              # Kötelező: az összes kocka mentése!
         append_images=kockak_kepei[1:], # Hozzáfűzzük a maradékok fáziskockáit
         duration=100,               # Képkockák közötti idő ezredmásodpercben (100ms = 10 FPS)
-        loop=0                      # 0 = Végtelenített, megszakítás nélküli ismétlődés (loop)
-    )
+        loop=0,                      # 0 = Végtelenített, megszakítás nélküli ismétlődés (loop)
+        lossless=False,  # Veszteségmentes mód bekapcsolása
+        quality=22  # Veszteségmentesnél ez a tömörítési algoritmus hatékonysága (0-100)
+    )'''
 
     plt.close()
     print(f"Siker! A '{save_name}' elkészült.")
