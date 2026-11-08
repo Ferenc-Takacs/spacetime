@@ -14,7 +14,7 @@ $$R_{\mu\nu} - \frac{1}{2}R g_{\mu\nu} + \Lambda(K, C^2) g_{\mu\nu} = \frac{8\pi
 
 Where the dynamic cosmological feedback loop is defined at the sub-atomic boundary via fixed geometric couplings (γ = 2/3, δ = 3/2) and scale-corrected by the Planck length $$(\ell_P^2 = 0.01\)$$:
 
-$$\phi = \ell_P^2 \left( \frac{2}{3}K + \frac{3}{2}C^2 \right)$$
+$$\Lambda = \ell_P^2 \left( \frac{2}{3}\sqrt{K} + \frac{3}{2}\sqrt{C^2} \right)$$
 
 *   **K (Kretschmann Scalar):** Measures localized Ricci-driven energy and tidal stresses, preventing gravitational singularities.
 *   **C² (Weyl Conformal Invariant Square):** Maps long-range non-local tidal shear and rotational vacuum tension.
@@ -55,7 +55,7 @@ The application exports the entire 4D metric tensor state into structured CSV sn
 
 ---
 
-## 🧪 Simulation Results (At 50,000 Iterations)
+## 🧪 Simulation Results (At 110,000 Iterations)
 
 Starting from a modified, central-smoothed (non-singular) Schwarzschild initial metric metric, the 4D manifold undergoes **spontaneous symmetry breaking** and topologico-hydrodynamic self-regulation:
 
