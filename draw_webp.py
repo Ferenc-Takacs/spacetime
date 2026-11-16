@@ -21,6 +21,9 @@ last_idx = 5 # number of line sectors
 wait_30 = True
 mask_lo_level = 0.3
 mask_hi_level = 3.0
+save_webp = True
+save_mp4 = True
+save_sound = False
 
 def clean_and_shape_3d(raw_vector, coord=False):
     global N
@@ -282,41 +285,44 @@ while True :
                 buf.close()    
 
 
-    print("Összefűzés és mentés animált WEBP fájlba...")
+    print("Összefűzés és mentés...")
     halftext = f"_{one_step}"
-    save_name = filename+halftext+".webp"
-
-
-    numpy_kockak = [np.array(img) for img in kockak_kepei]
-    video_clip  = ImageSequenceClip(numpy_kockak, fps=10)
-    audio_clip = AudioFileClip("Hans_Zimmer_-_Interstellar_Main_Theme.mp3").subclipped(0, video_clip.duration)
-    video_clip = video_clip.with_audio(audio_clip)
-    # Megjegyzés: A TextClip-hez szükséges, at ImageMagick telepítve legyen a gépeden
-    #HOSSZU_SZOVEG = "Ez itt egy hosszabb szöveg,\nami szépen lassan\nfelfelé fog úszni\na képernyőn..."
-    #txt_clip = TextClip(font='C:\\Windows\\Fonts\\arialbd.ttf', text=HOSSZU_SZOVEG, font_size=50, color='white')
-    #txt_clip = txt_clip.with_position(('center', 'bottom')).with_duration(video_clip.duration)
-    #sebesseg = 50
-    #w, h = video_clip.size
-    #def uszato_pozicio(t):
-    #    x = 'center'                      # Vízszintesen marad középen
-    #    y = h - (t * sebesseg)            # Függőleges pozíció számítása
-    #    return (x, y)
-    #txt_clip = txt_clip.with_position(uszato_pozicio)
-    #final_clip = CompositeVideoClip([video_clip, txt_clip]).fx(loop)
-    #video_clip.fx(loop=0)
-    video_clip.write_videofile(filename+halftext+".mp4", codec="libx264", audio_codec="aac", bitrate="5000k")
-
-    '''kockak_kepei[0].save(
-        save_name,
-        format="WEBP",                  # Explicit megadjuk a formátumot
-        save_all=True,              # Kötelező: az összes kocka mentése!
-        append_images=kockak_kepei[1:], # Hozzáfűzzük a maradékok fáziskockáit
-        duration=100,               # Képkockák közötti idő ezredmásodpercben (100ms = 10 FPS)
-        loop=0,                      # 0 = Végtelenített, megszakítás nélküli ismétlődés (loop)
-        lossless=False,  # Veszteségmentes mód bekapcsolása
-        quality=22  # Veszteségmentesnél ez a tömörítési algoritmus hatékonysága (0-100)
-    )'''
-
     plt.close()
-    print(f"Siker! A '{save_name}' elkészült.")
+
+    if save_mp4 :
+        save_name = filename+halftext+".mp4"
+        numpy_kockak = [np.array(img) for img in kockak_kepei]
+        video_clip  = ImageSequenceClip(numpy_kockak, fps=10)
+        if save_sound :
+            audio_clip = AudioFileClip("Hans_Zimmer_-_Interstellar_Main_Theme.mp3").subclipped(0, video_clip.duration)
+            video_clip = video_clip.with_audio(audio_clip)
+        # Megjegyzés: A TextClip-hez szükséges, at ImageMagick telepítve legyen a gépeden
+        #HOSSZU_SZOVEG = "Ez itt egy hosszabb szöveg,\nami szépen lassan\nfelfelé fog úszni\na képernyőn..."
+        #txt_clip = TextClip(font='C:\\Windows\\Fonts\\arialbd.ttf', text=HOSSZU_SZOVEG, font_size=50, color='white')
+        #txt_clip = txt_clip.with_position(('center', 'bottom')).with_duration(video_clip.duration)
+        #sebesseg = 50
+        #w, h = video_clip.size
+        #def uszato_pozicio(t):
+        #    x = 'center'                      # Vízszintesen marad középen
+        #    y = h - (t * sebesseg)            # Függőleges pozíció számítása
+        #    return (x, y)
+        #txt_clip = txt_clip.with_position(uszato_pozicio)
+        #final_clip = CompositeVideoClip([video_clip, txt_clip]).fx(loop)
+        #video_clip.fx(loop=0)
+        video_clip.write_videofile(filename+halftext+".mp4", codec="libx264", audio_codec="aac", bitrate="2500k")
+        print(f"Siker! A '{save_name}' elkészült.")
+
+    if save_webp :
+        save_name = filename+halftext+".webp"
+        kockak_kepei[0].save(
+            save_name,
+            format="WEBP",                  # Explicit megadjuk a formátumot
+            save_all=True,              # Kötelező: az összes kocka mentése!
+            append_images=kockak_kepei[1:], # Hozzáfűzzük a maradékok fáziskockáit
+            duration=100,               # Képkockák közötti idő ezredmásodpercben (100ms = 10 FPS)
+            loop=0,                      # 0 = Végtelenített, megszakítás nélküli ismétlődés (loop)
+            lossless=False,  # Veszteségmentes mód bekapcsolása
+            quality=18  # Veszteségmentesnél ez a tömörítési algoritmus hatékonysága (0-100)
+        )
+        print(f"Siker! A '{save_name}' elkészült.")
 
